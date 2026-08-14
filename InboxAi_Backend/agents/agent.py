@@ -1,92 +1,104 @@
 from google.adk.agents.llm_agent import Agent
 from google.adk.models.lite_llm import LiteLlm
-
 from pydantic import BaseModel
+from google.adk.agents import SequentialAgent
 from tools.tools import get_current_datetime
+from tools.tools import create_task
+from tools.tools import save_email
 
-class mail_summary(BaseModel):
-    summary: str
-    task: str
-    deadline: str
+
 
 understand_mails = Agent(
     model=LiteLlm("groq/llama-3.3-70b-versatile"),
-    name='understand_mails',
+    name="understand_mails",
     description="Analyzes emails and extracts their summary, tasks, and deadlines.",
     instruction="""
     You are an email analysis agent for InboxAI.
 
-    Analyze the email provided by the user and extract the following information:
+    Analyze the email provided by the user.
 
-    1. Summary:
-    Give a short and clear summary of the email.
+    Extract:
+    - summary: a short and clear summary
+    - task: the action the user needs to complete
+    - deadline: the deadline mentioned in the email
+    and return them in a structured format.
 
-    2. Task:
-    Identify the action or task that the user needs to complete.
-    If there is no task, return "No task".
-
-    3. Deadline:
-    Identify the deadline for the task.
-    If there is no deadline, return "No deadline".
-
-    Return the result in exactly this format:
-
-    Summary: <short summary>
-    Task: <task or No task>
-    Deadline: <deadline or No deadline>
-
-    Do not invent information that is not present in the email.
+    If there is no task, use "No task".
+    If there is no deadline, use "No deadline".
+    and then call the save_email tool with the summary, task, and deadline.
+    Do not invent information.
     """,
-    output_schema=mail_summary,
-    output_key="mail_analysis"
+    output_key="mail_analysis",
+    tools=[save_email]
 )
 
 
 priority_agent = Agent(
     model=LiteLlm("groq/llama-3.3-70b-versatile"),
-    name='priority_agent',
-    description="Determines the priority of tasks based on their deadlines.",
+    name="priority_agent",
+    description="Determines task priority based on the deadline.",
     instruction="""
-    Analyze the tasks and deadlines extracted from emails.
+    You are a priority analysis agent for InboxAI.
 
-    Determine the priority of each task based primarily on how soon
-    its deadline is:
+    Analyze the task and deadline from the email analysis:
+    {mail_analysis}
 
-    - High: deadline is today or tomorrow.
-    - Medium: deadline is within the next 3 to 7 days.
-    - Low: deadline is more than 7 days away or there is no urgent deadline.
+    First, use the get_current_datetime tool to get the current date and time.
 
-    Always consider the deadline/time remaining as the main factor
-    when determining priority.
+    Calculate exactly how many days remain until the deadline.
 
-    Return the task, deadline, priority, and a brief reason.
+    Priority rules:
+
+    - High: deadline is today or within the next 2 days.
+    - Medium: deadline is 3 to 7 days away.
+    - Low: deadline is more than 7 days away.
+    - If there is no deadline, use Medium.
+    - After determining the priority, ALWAYS call the create_task tool
+        with the task, deadline, and priority.
+    Return:
+    - task
+    - deadline
+    - priority
+    - reason
+    The reason must state the actual number of days remaining.
+    Do not guess the current date.
     """,
-    tools=[get_current_datetime]
+    tools=[get_current_datetime, create_task],
+    output_key="priority_analysis"
 )
 
 
-# task_from_mails = Agent(
+# root_agent = Agent(
 #     model=LiteLlm("groq/llama-3.3-70b-versatile"),
-#     name='task_from_mails',
-#     description='A helpful assistant for user questions.',
-#     instruction='Answer user questions to the best of your knowledge',
+#     name="orchestrator",
+#     description="Orchestrates the email analysis and prioritization process.",
+#     instruction="""
+#     You are the main orchestrator for InboxAI.
+
+#     Follow these steps:
+
+#     1. Delegate the user's email to understand_mails.
+#     2. Wait for the email analysis.
+#     3. If a task exists, delegate to priority_agent.
+#     4. Return the final result containing:
+#        - Summary
+#        - Task
+#        - Deadline
+#        - Priority
+#        - Reason
+
+#     Do not invent information.
+#     """,
+#     sub_agents=[understand_mails, priority_agent]
 # )
 
 
-root_agent = Agent(
-    model=LiteLlm("groq/llama-3.3-70b-versatile"),
-    name='orchestrator',
-    description="Orchestrates the email analysis and prioritization process.",
-    instruction="""
-    You are the main orchestrator for InboxAI.
-
-    When the user provides an email:
-    1. Delegate the email to understand_mails to extract the summary, task, and deadline{mail_summary?}.
-    2. If a task and deadline are found, delegate the result to priority_agent.
-    3. Return a clear final response containing the summary, task, deadline, and priority.
-
-    Do not invent information that is not present in the email.
-    """,
-    sub_agents=[understand_mails, priority_agent]
+email_workflow = SequentialAgent(
+    name="email_workflow",
+    sub_agents=[
+        understand_mails,
+        priority_agent
+    ]
 )
 
+root_agent = email_workflow

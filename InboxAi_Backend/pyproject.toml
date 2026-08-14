@@ -8,5 +8,6 @@ dependencies = [
     "fastapi>=0.141.1",
     "google-adk>=2.7.0",
     "litellm",
+    "redis>=8.1.0",
     "uvicorn>=0.52.3",
 ]
