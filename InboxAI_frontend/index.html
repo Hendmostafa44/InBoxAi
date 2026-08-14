@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>InboxAI — AI Email Assistant</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-icon">✦</div>
+        <div>
+          <strong>InboxAI</strong>
+          <span>AI Email Assistant</span>
+        </div>
+      </div>
+
+      <nav class="nav">
+        <button class="nav-item active" data-page="dashboard"><span>⌂</span> Dashboard</button>
+        <button class="nav-item" data-page="inbox"><span>✉</span> Inbox <b>24</b></button>
+        <button class="nav-item" data-page="important"><span>★</span> Important</button>
+        <button class="nav-item" data-page="tasks"><span>✓</span> Tasks <b>5</b></button>
+        <button class="nav-item" data-page="deadlines"><span>◷</span> Deadlines</button>
+        <button class="nav-item" data-page="assistant"><span>✦</span> AI Assistant</button>
+      </nav>
+
+      <div class="sidebar-bottom">
+        <button class="nav-item" data-page="settings"><span>⚙</span> Settings</button>
+        <div class="profile">
+          <div class="avatar">H</div>
+          <div><strong>Hend</strong><span>Personal workspace</span></div>
+          <span class="dots">•••</span>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="mobile-brand">✦ InboxAI</div>
+        <div class="top-actions">
+          <button class="icon-btn" title="Notifications">♢<i></i></button>
+          <div class="top-avatar">H</div>
+        </div>
+      </header>
+
+      <section id="dashboard" class="page active-page">
+        <div class="page-heading">
+          <div>
+            <p class="eyebrow">FRIDAY, AUGUST 14</p>
+            <h1>Good morning, Hend <span>👋</span></h1>
+            <p class="muted">Here's what needs your attention today.</p>
+          </div>
+          <button class="primary-btn" data-page-target="assistant">✦ Ask InboxAI</button>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-card"><div class="stat-top"><span class="stat-icon blue">✉</span><span class="trend">+8 today</span></div><strong>24</strong><span>Emails today</span></div>
+          <div class="stat-card"><div class="stat-top"><span class="stat-icon purple">✓</span><span class="trend">2 completed</span></div><strong>5</strong><span>Pending tasks</span></div>
+          <!-- <div class="stat-card"><div class="stat-top"><span class="stat-icon orange">!</span><span class="trend warning">Needs attention</span></div><strong>3</strong><span>Urgent emails</span></div> -->
+          <!-- <div class="stat-card"><div class="stat-top"><span class="stat-icon green">◷</span><span class="trend">Next: tomorrow</span></div><strong>4</strong><span>Upcoming deadlines</span></div> -->
+        </div>
+
+        <div class="content-grid">
+          <div class="panel">
+            <div class="panel-head"><div><h2>Today's priorities</h2><p class="muted">AI-ranked items that need your attention.</p></div><button class="text-btn" data-page-target="tasks">View all →</button></div>
+            <div class="priority-list">
+              <div class="priority-item"><span class="priority-dot high"></span><div><strong>Reply to internship email</strong><p>Google Careers · Received 18 min ago</p></div><span class="tag red">High</span></div>
+              <div class="priority-item"><span class="priority-dot high"></span><div><strong>Submit AI project report</strong><p>University · Due tomorrow</p></div><span class="tag red">High</span></div>
+              <div class="priority-item"><span class="priority-dot medium"></span><div><strong>Review team meeting invitation</strong><p>Ahmed · Monday, 10:00 AM</p></div><span class="tag amber">Medium</span></div>
+            </div>
+          </div>
+
+          <div class="panel ai-card">
+            <div class="ai-glow"></div>
+            <div class="ai-header"><div class="ai-logo">✦</div><div><h2>InboxAI insight</h2><p>Based on your inbox today</p></div></div>
+            <p class="insight">You have <strong>3 urgent emails</strong> and <strong>2 deadlines</strong> coming up. I recommend replying to the internship email first.</p>
+            <button class="secondary-btn" data-page-target="assistant">Ask about my inbox →</button>
+          </div>
+        </div>
+
+        <div class="panel recent-panel">
+          <div class="panel-head"><div><h2>Recent emails</h2><p class="muted">Your latest messages, analyzed by InboxAI.</p></div><button class="text-btn" data-page-target="inbox">Open inbox →</button></div>
+          <div class="email-table">
+            <div class="email-row unread"><div class="sender-avatar purple-bg">G</div><div class="email-main"><strong>Google Careers</strong><span>Internship Opportunity</span></div><div class="email-preview">You've been selected for the next stage...</div><span class="tag red">High</span><span class="email-time">10:42 AM</span></div>
+            <div class="email-row unread"><div class="sender-avatar blue-bg">U</div><div class="email-main"><strong>University</strong><span>Project Submission</span></div><div class="email-preview">Please submit your AI project report...</div><span class="tag red">High</span><span class="email-time">9:15 AM</span></div>
+            <div class="email-row"><div class="sender-avatar green-bg">A</div><div class="email-main"><strong>Ahmed</strong><span>Team Meeting</span></div><div class="email-preview">Let's schedule our next project meeting...</div><span class="tag amber">Medium</span><span class="email-time">Yesterday</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="inbox" class="page">
+        <div class="page-heading compact"><div><p class="eyebrow">YOUR MAIL</p><h1>Inbox</h1><p class="muted">24 messages · 3 need your attention</p></div><button class="primary-btn" data-page-target="assistant">✦ Ask AI</button></div>
+        <div class="search-row"><div class="search-box">⌕ <input id="emailSearch" placeholder="Search emails..."></div><button class="filter-btn">☷ Filter</button></div>
+        <div class="panel email-list" id="emailList">
+          <div class="email-card unread" data-search="google careers internship opportunity selected"><div class="sender-avatar purple-bg">G</div><div class="email-body"><div class="email-line"><strong>Google Careers</strong><span>10:42 AM</span></div><h3>Internship Opportunity</h3><p>You've been selected for the next stage of the AI Engineering internship process.</p><div class="email-meta"><span class="tag red">High Priority</span><span>◷ Tomorrow</span><span>✓ Task detected</span></div></div></div>
+          <div class="email-card unread" data-search="university project submission report deadline"><div class="sender-avatar blue-bg">U</div><div class="email-body"><div class="email-line"><strong>University</strong><span>9:15 AM</span></div><h3>AI Project Submission</h3><p>Please submit your AI project report before the deadline.</p><div class="email-meta"><span class="tag red">High Priority</span><span>◷ Tomorrow</span><span>✓ Task detected</span></div></div></div>
+          <div class="email-card" data-search="ahmed team meeting project"><div class="sender-avatar green-bg">A</div><div class="email-body"><div class="email-line"><strong>Ahmed</strong><span>Yesterday</span></div><h3>Team Meeting</h3><p>Let's schedule our next project meeting and discuss the remaining tasks.</p><div class="email-meta"><span class="tag amber">Medium</span><span>◷ Monday 10:00 AM</span></div></div></div>
+        </div>
+      </section>
+
+      <section id="important" class="page">
+        <div class="page-heading compact"><div><p class="eyebrow">AI FILTER</p><h1>Important</h1><p class="muted">Messages InboxAI marked as high priority.</p></div></div>
+        <div class="empty-feature"><div class="big-icon">★</div><h2>3 important emails</h2><p>High-priority messages from your inbox will appear here.</p><button class="primary-btn" data-page-target="inbox">View inbox</button></div>
+      </section>
+
+      <section id="tasks" class="page">
+        <div class="page-heading compact"><div><p class="eyebrow">ACTION ITEMS</p><h1>Tasks</h1><p class="muted">Tasks automatically extracted from your emails.</p></div><button class="primary-btn">＋ New task</button></div>
+        <div class="task-columns">
+          <div class="panel"><div class="panel-head"><h2>To do <span class="count">3</span></h2></div>
+            <div class="task"><input type="checkbox"><div><strong>Reply to internship email</strong><p>From Google Careers · Today</p></div><span class="tag red">High</span></div>
+            <div class="task"><input type="checkbox"><div><strong>Submit AI project report</strong><p>University · Tomorrow</p></div><span class="tag red">High</span></div>
+            <div class="task"><input type="checkbox"><div><strong>Review meeting invitation</strong><p>Ahmed · Monday</p></div><span class="tag amber">Medium</span></div>
+          </div>
+          <div class="panel"><div class="panel-head"><h2>Completed <span class="count">2</span></h2></div>
+            <div class="task done"><input type="checkbox" checked><div><strong>Send project files</strong><p>Completed today</p></div></div>
+            <div class="task done"><input type="checkbox" checked><div><strong>Reply to university email</strong><p>Completed yesterday</p></div></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="deadlines" class="page">
+        <div class="page-heading compact"><div><p class="eyebrow">TIME SENSITIVE</p><h1>Deadlines</h1><p class="muted">Upcoming dates detected from your emails.</p></div></div>
+        <div class="deadline-grid">
+          <div class="deadline-card urgent"><span>Tomorrow</span><strong>AI Project Report</strong><p>University · High priority</p></div>
+          <div class="deadline-card"><span>Aug 17</span><strong>Team Meeting</strong><p>Ahmed · 10:00 AM</p></div>
+          <div class="deadline-card"><span>Aug 20</span><strong>Internship Response</strong><p>Google Careers · Reply required</p></div>
+        </div>
+      </section>
+
+      <section id="assistant" class="page">
+        <div class="page-heading compact"><div><p class="eyebrow">YOUR AI COPILOT</p><h1>AI Assistant</h1><p class="muted">Ask questions about your inbox and tasks.</p></div></div>
+        <div class="chat-shell panel">
+          <div class="chat-messages" id="chatMessages">
+            <div class="message ai"><div class="chat-avatar">✦</div><div><span class="message-name">InboxAI</span><div class="bubble">Hi Hend! I'm your InboxAI assistant. Ask me about your emails, tasks, priorities, or deadlines.</div></div></div>
+            <div class="quick-prompts"><button>What needs my attention today?</button><button>Show my urgent emails</button><button>What tasks are due tomorrow?</button></div>
+          </div>
+          <form class="chat-input" id="chatForm"><input id="chatInput" autocomplete="off" placeholder="Ask InboxAI anything..."><button type="submit">➤</button></form>
+        </div>
+      </section>
+
+      <section id="settings" class="page">
+        <div class="page-heading compact"><div><p class="eyebrow">PREFERENCES</p><h1>Settings</h1><p class="muted">Manage your InboxAI experience.</p></div></div>
+        <div class="panel settings-panel">
+          <div class="setting-row"><div><strong>AI priority detection</strong><p>Let InboxAI identify urgent messages automatically.</p></div><label class="switch"><input type="checkbox" checked><span></span></label></div>
+          <div class="setting-row"><div><strong>Task extraction</strong><p>Automatically create tasks from email requests and deadlines.</p></div><label class="switch"><input type="checkbox" checked><span></span></label></div>
+          <div class="setting-row"><div><strong>Daily inbox summary</strong><p>Get a morning summary of important emails and tasks.</p></div><label class="switch"><input type="checkbox" checked><span></span></label></div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="script.js"></script>
+</body>
+</html>
