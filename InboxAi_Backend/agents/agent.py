@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from google.adk.agents import SequentialAgent
 from tools.tools import get_current_datetime
 from tools.tools import create_task
-from tools.tools import save_email
+from tools.tools import save_task
 
 
 
@@ -25,11 +25,11 @@ understand_mails = Agent(
 
     If there is no task, use "No task".
     If there is no deadline, use "No deadline".
-    and then call the save_email tool with the summary, task, and deadline.
+    and then call the save_task tool with the summary, task, and deadline.
     Do not invent information.
     """,
     output_key="mail_analysis",
-    tools=[save_email]
+    tools=[save_task]
 )
 
 

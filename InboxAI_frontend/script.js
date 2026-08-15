@@ -38,25 +38,65 @@ function addMessage(text, type) {
   chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
-function demoReply(q) {
-  const text = q.toLowerCase();
-  if (text.includes("urgent") || text.includes("attention")) {
-    return "You have <strong>3 urgent emails</strong>: the Google Careers internship email, the AI project submission, and the team meeting invitation.";
-  }
-  if (text.includes("tomorrow") || text.includes("deadline")) {
-    return "You have <strong>2 time-sensitive items</strong>: submit the AI project report tomorrow and reply to the internship email by tomorrow.";
-  }
-  return "I found the key items in your inbox. You currently have <strong>3 urgent emails</strong>, <strong>5 pending tasks</strong>, and <strong>4 upcoming deadlines</strong>.";
-}
 
-chatForm.addEventListener("submit", e => {
-  e.preventDefault();
-  const value = chatInput.value.trim();
-  if (!value) return;
-  addMessage(value, "user");
-  chatInput.value = "";
-  setTimeout(() => addMessage(demoReply(value), "ai"), 450);
+
+
+
+
+
+
+
+
+
+
+// function demoReply(q) {
+//   const text = q.toLowerCase();
+//   if (text.includes("urgent") || text.includes("attention")) {
+//     return "You have <strong>3 urgent emails</strong>: the Google Careers internship email, the AI project submission, and the team meeting invitation.";
+//   }
+//   if (text.includes("tomorrow") || text.includes("deadline")) {
+//     return "You have <strong>2 time-sensitive items</strong>: submit the AI project report tomorrow and reply to the internship email by tomorrow.";
+//   }
+//   return "I found the key items in your inbox. You currently have <strong>3 urgent emails</strong>, <strong>5 pending tasks</strong>, and <strong>4 upcoming deadlines</strong>.";
+// }
+
+chatForm.addEventListener("submit", async e => {
+    e.preventDefault();
+
+    const value = chatInput.value.trim();
+    if (!value) return;
+
+    addMessage(value, "user");
+    chatInput.value = "";
+
+    try {
+        const response = await fetch("http://localhost:8007/analyze", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                message: value
+            })
+        });
+
+        const data = await response.json();
+
+        addMessage(data.response, "ai");
+
+    } catch (error) {
+        console.error("Error:", error);
+        addMessage("Sorry, something went wrong.", "ai");
+    }
 });
+
+
+
+
+
+
+
+
 
 document.querySelectorAll(".quick-prompts button").forEach(btn => {
   btn.addEventListener("click", () => {
