@@ -36,20 +36,20 @@ class MailSummary(BaseModel):
     summary: str
     task: str
     deadline: str
+    priority: str
 
 
 @app.post("/save_task")
 async def save_task(mail_summary: MailSummary):
-    # return {
-    #     "summary": mail_summary.summary,
-    #     "task": mail_summary.task,
-    #     "deadline": mail_summary.deadline
-    # }
-    email= json.dumps({
-    "summary": mail_summary.summary,
-    "task": mail_summary.task,
-    "deadline": mail_summary.deadline
-        })
+
+    email = json.dumps({
+        "summary": mail_summary.summary,
+        "task": mail_summary.task,
+        "deadline": mail_summary.deadline,
+        "priority": mail_summary.priority,
+        "status": "pending"
+    })
+
     r.rpush("emails", email)
 
     return {"message": "Email saved successfully"}
@@ -110,6 +110,74 @@ async def analyze_email(request: EmailRequest):
     return {
         "response": final_response
     }
+
+@app.get("/tasks/count")
+async def get_tasks_count():
+    count = r.llen("emails")
+    return {"count": count}
+
+
+@app.get("/tasks/pending/count")
+async def get_pending_tasks_count():
+    tasks = r.lrange("emails", 0, -1)
+
+    pending_count = sum(
+        1
+        for task in tasks
+        if json.loads(task).get("status") == "pending"
+    )
+
+    return {"count": pending_count}
+
+
+
+@app.get("/tasks/priorities")
+async def get_priorities():
+    tasks = r.lrange("emails", 0, -1)
+
+    result = []
+
+    for task in tasks:
+        task = json.loads(task)
+
+        if task.get("priority") in ["High", "Medium", "Low"]:
+            result.append(task)
+
+    return result
+
+@app.get("/tasks/all")
+async def get_all_tasks():
+    tasks = r.lrange("emails", 0, -1)
+
+    return [json.loads(task) for task in tasks]
+
+
+
+@app.put("/tasks/status")
+async def update_task_status(task_name: str, status: str):
+    tasks = r.lrange("emails", 0, -1)
+
+    for index, task in enumerate(tasks):
+        task_data = json.loads(task)
+
+        if task_data.get("task") == task_name:
+            task_data["status"] = status
+
+            r.lset(
+                "emails",
+                index,
+                json.dumps(task_data)
+            )
+
+            return {
+                "message": "Task status updated",
+                "status": status
+            }
+
+    return {"message": "Task not found"}
+
+
+
 
 if __name__ == "__main__":
     import uvicorn

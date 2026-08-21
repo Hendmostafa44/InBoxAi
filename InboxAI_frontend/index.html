@@ -22,9 +22,9 @@
 
       <nav class="nav">
         <button class="nav-item active" data-page="dashboard"><span>⌂</span> Dashboard</button>
-        <button class="nav-item" data-page="inbox"><span>✉</span> Inbox <b>24</b></button>
+        <button class="nav-item" data-page="inbox"><span>✉</span> Inbox </button>
         <button class="nav-item" data-page="important"><span>★</span> Important</button>
-        <button class="nav-item" data-page="tasks"><span>✓</span> Tasks <b>5</b></button>
+        <button class="nav-item" data-page="tasks"><span>✓</span> Tasks </button>
         <button class="nav-item" data-page="deadlines"><span>◷</span> Deadlines</button>
         <button class="nav-item" data-page="assistant"><span>✦</span> AI Assistant</button>
       </nav>
@@ -59,8 +59,8 @@
         </div>
 
         <div class="stats-grid">
-          <div class="stat-card"><div class="stat-top"><span class="stat-icon blue">✉</span><span class="trend">+8 today</span></div><strong>24</strong><span>Emails today</span></div>
-          <div class="stat-card"><div class="stat-top"><span class="stat-icon purple">✓</span><span class="trend">2 completed</span></div><strong>5</strong><span>Pending tasks</span></div>
+          <div class="stat-card"><div class="stat-top"><span class="stat-icon blue">✉</span></span></div><strong id="email-count">24</strong><span>Emails</span></div>
+          <div class="stat-card"><div class="stat-top"><span class="stat-icon purple">✓</span></span></div ><strong id="pending_tasks"></strong><span>Pending tasks</span></div>
           <!-- <div class="stat-card"><div class="stat-top"><span class="stat-icon orange">!</span><span class="trend warning">Needs attention</span></div><strong>3</strong><span>Urgent emails</span></div> -->
           <!-- <div class="stat-card"><div class="stat-top"><span class="stat-icon green">◷</span><span class="trend">Next: tomorrow</span></div><strong>4</strong><span>Upcoming deadlines</span></div> -->
         </div>
@@ -69,9 +69,9 @@
           <div class="panel">
             <div class="panel-head"><div><h2>Today's priorities</h2><p class="muted">AI-ranked items that need your attention.</p></div><button class="text-btn" data-page-target="tasks">View all →</button></div>
             <div class="priority-list">
-              <div class="priority-item"><span class="priority-dot high"></span><div><strong>Reply to internship email</strong><p>Google Careers · Received 18 min ago</p></div><span class="tag red">High</span></div>
-              <div class="priority-item"><span class="priority-dot high"></span><div><strong>Submit AI project report</strong><p>University · Due tomorrow</p></div><span class="tag red">High</span></div>
-              <div class="priority-item"><span class="priority-dot medium"></span><div><strong>Review team meeting invitation</strong><p>Ahmed · Monday, 10:00 AM</p></div><span class="tag amber">Medium</span></div>
+              <div class="priority-item"><span class="priority-dot high"></span><div><strong></strong><p></p></div><span class="tag red"></span></div>
+              <div class="priority-item"><span class="priority-dot high"></span><div><strong></strong><p></p></div><span class="tag red"></span></div>
+              <div class="priority-item"><span class="priority-dot medium"></span><div><strong></strong><p></p></div><span class="tag amber"></span></div>
             </div>
           </div>
 
@@ -111,10 +111,14 @@
       <section id="tasks" class="page">
         <div class="page-heading compact"><div><p class="eyebrow">ACTION ITEMS</p><h1>Tasks</h1><p class="muted">Tasks automatically extracted from your emails.</p></div><button class="primary-btn">＋ New task</button></div>
         <div class="task-columns">
-          <div class="panel"><div class="panel-head"><h2>To do <span class="count">3</span></h2></div>
-            <div class="task"><input type="checkbox"><div><strong>Reply to internship email</strong><p>From Google Careers · Today</p></div><span class="tag red">High</span></div>
-            <div class="task"><input type="checkbox"><div><strong>Submit AI project report</strong><p>University · Tomorrow</p></div><span class="tag red">High</span></div>
-            <div class="task"><input type="checkbox"><div><strong>Review meeting invitation</strong><p>Ahmed · Monday</p></div><span class="tag amber">Medium</span></div>
+          <div class="panel">
+              <div class="panel-head">
+                  <h2>To do <span class="count" id="todo-count">0</span></h2>
+              </div>
+
+              <div id="todo-list">
+                  <!-- Tasks will appear here -->
+              </div>
           </div>
           <div class="panel"><div class="panel-head"><h2>Completed <span class="count">2</span></h2></div>
             <div class="task done"><input type="checkbox" checked><div><strong>Send project files</strong><p>Completed today</p></div></div>

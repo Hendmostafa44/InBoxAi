@@ -24,18 +24,20 @@ async def get_current_datetime() -> str:
 
 async def create_task(task: str, deadline: str, priority: str) -> dict:
     return {
-        "status": "success",
+        "status": "pending",
         "task": task,
         "deadline": deadline,
         "priority": priority
     }
 
 
-def save_task(summary: str, task: str, deadline: str):
+def save_task(summary: str, task: str, deadline: str, priority: str) -> dict:
     email = json.dumps({
         "summary": summary,
         "task": task,
-        "deadline": deadline
+        "deadline": deadline,
+        "priority": priority,
+        "status": "pending",
     })
 
     r.rpush("emails", email)

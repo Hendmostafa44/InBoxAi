@@ -9,7 +9,7 @@ from tools.tools import save_task
 
 
 understand_mails = Agent(
-    model=LiteLlm("groq/llama-3.3-70b-versatile"),
+    model="gemini-3.5-flash-lite",
     name="understand_mails",
     description="Analyzes emails and extracts their summary, tasks, and deadlines.",
     instruction="""
@@ -25,16 +25,16 @@ understand_mails = Agent(
 
     If there is no task, use "No task".
     If there is no deadline, use "No deadline".
-    and then call the save_task tool with the summary, task, and deadline.
+
     Do not invent information.
     """,
     output_key="mail_analysis",
-    tools=[save_task]
+    tools=[]
 )
 
 
 priority_agent = Agent(
-    model=LiteLlm("groq/llama-3.3-70b-versatile"),
+    model="gemini-3.5-flash-lite",
     name="priority_agent",
     description="Determines task priority based on the deadline.",
     instruction="""
@@ -62,8 +62,9 @@ priority_agent = Agent(
     - reason
     The reason must state the actual number of days remaining.
     Do not guess the current date.
+    after that all use the save_task tool to save the task, deadline, and priority in Redis.
     """,
-    tools=[get_current_datetime, create_task],
+    tools=[get_current_datetime, create_task,save_task],
     output_key="priority_analysis"
 )
 
