@@ -1,3 +1,12 @@
+const userName = prompt("Enter your name:");
+
+if (userName && userName.trim() !== "") {
+
+    document.querySelectorAll(".user-name").forEach(element => {
+        element.textContent = userName.trim();
+    });
+
+}
 const pages = document.querySelectorAll(".page");
 const navItems = document.querySelectorAll(".nav-item");
 
