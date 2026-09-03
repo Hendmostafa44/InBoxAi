@@ -11,3 +11,6 @@ dependencies = [
     "redis>=8.1.0",
     "uvicorn>=0.52.3",
 ]
+
+[tool.fastapi]
+entrypoint = "server:app"
