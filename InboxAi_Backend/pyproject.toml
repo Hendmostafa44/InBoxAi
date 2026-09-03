@@ -1,15 +1,18 @@
 [project]
 name = "inboxai-backend"
 version = "0.1.0"
-description = "Add your description here"
+description = "InboxAI Backend API Service"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi>=0.141.1",
+    "fastapi[standard]>=0.110.0",
+    "fastapi-cli>=0.0.1",
+    "python-multipart>=0.0.9",
     "google-adk>=2.7.0",
-    "litellm",
+    "google-genai>=0.1.0",
+    "litellm>=1.30.0",
     "redis>=8.1.0",
-    "uvicorn>=0.52.3",
+    "uvicorn>=0.28.0",
 ]
 
 [tool.fastapi]
