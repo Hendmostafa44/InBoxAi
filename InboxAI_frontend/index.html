@@ -59,7 +59,7 @@
         </div>
 
         <div class="stats-grid">
-          <div class="stat-card"><div class="stat-top"><span class="stat-icon blue">✉</span></span></div><strong id="email-count">24</strong><span>Emails</span></div>
+          <div class="stat-card"><div class="stat-top"><span class="stat-icon blue">✉</span></span></div><strong id="email-count"></strong><span>Emails</span></div>
           <div class="stat-card"><div class="stat-top"><span class="stat-icon purple">✓</span></span></div ><strong id="pending_tasks"></strong><span>Pending tasks</span></div>
           <!-- <div class="stat-card"><div class="stat-top"><span class="stat-icon orange">!</span><span class="trend warning">Needs attention</span></div><strong>3</strong><span>Urgent emails</span></div> -->
           <!-- <div class="stat-card"><div class="stat-top"><span class="stat-icon green">◷</span><span class="trend">Next: tomorrow</span></div><strong>4</strong><span>Upcoming deadlines</span></div> -->
@@ -80,15 +80,6 @@
             <div class="ai-header"><div class="ai-logo">✦</div><div><h2>InboxAI insight</h2><p>Based on your inbox today</p></div></div>
             <p class="insight">You have <strong>3 urgent emails</strong> and <strong>2 deadlines</strong> coming up. I recommend replying to the internship email first.</p>
             <button class="secondary-btn" data-page-target="assistant">Ask about my inbox →</button>
-          </div>
-        </div>
-
-        <div class="panel recent-panel">
-          <div class="panel-head"><div><h2>Recent emails</h2><p class="muted">Your latest messages, analyzed by InboxAI.</p></div><button class="text-btn" data-page-target="inbox">Open inbox →</button></div>
-          <div class="email-table">
-            <div class="email-row unread"><div class="sender-avatar purple-bg">G</div><div class="email-main"><strong>Google Careers</strong><span>Internship Opportunity</span></div><div class="email-preview">You've been selected for the next stage...</div><span class="tag red">High</span><span class="email-time">10:42 AM</span></div>
-            <div class="email-row unread"><div class="sender-avatar blue-bg">U</div><div class="email-main"><strong>University</strong><span>Project Submission</span></div><div class="email-preview">Please submit your AI project report...</div><span class="tag red">High</span><span class="email-time">9:15 AM</span></div>
-            <div class="email-row"><div class="sender-avatar green-bg">A</div><div class="email-main"><strong>Ahmed</strong><span>Team Meeting</span></div><div class="email-preview">Let's schedule our next project meeting...</div><span class="tag amber">Medium</span><span class="email-time">Yesterday</span></div>
           </div>
         </div>
       </section>
@@ -151,10 +142,8 @@
 
       <section id="deadlines" class="page">
         <div class="page-heading compact"><div><p class="eyebrow">TIME SENSITIVE</p><h1>Deadlines</h1><p class="muted">Upcoming dates detected from your emails.</p></div></div>
-        <div class="deadline-grid">
-          <div class="deadline-card urgent"><span>Tomorrow</span><strong>AI Project Report</strong><p>University · High priority</p></div>
-          <div class="deadline-card"><span>Aug 17</span><strong>Team Meeting</strong><p>Ahmed · 10:00 AM</p></div>
-          <div class="deadline-card"><span>Aug 20</span><strong>Internship Response</strong><p>Google Careers · Reply required</p></div>
+        <div class="deadline-grid" id="deadlineGrid">
+          <!-- Dynamic deadlines sorted by priority will appear here -->
         </div>
       </section>
 

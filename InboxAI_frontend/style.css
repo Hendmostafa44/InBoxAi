@@ -117,11 +117,15 @@ h3 { font-size: 14px; margin: 7px 0; }
 .task strong { display: block; font-size: 10px; } .task p { color: var(--muted); font-size: 8px; margin: 4px 0 0; }
 .task.done strong { text-decoration: line-through; color: #9da1ad; }
 .deadline-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; }
-.deadline-card { padding: 22px; border-radius: 14px; border: 1px solid var(--border); background: var(--surface); box-shadow: var(--shadow); }
-.deadline-card span { color: var(--primary); font-size: 10px; font-weight: 700; }
-.deadline-card strong { display: block; margin: 15px 0 6px; font-size: 13px; }
-.deadline-card p { color: var(--muted); font-size: 9px; margin: 0; }
-.deadline-card.urgent { border-left: 3px solid var(--red); }
+.deadline-card { padding: 22px; border-radius: 14px; border: 1px solid var(--border); background: var(--surface); box-shadow: var(--shadow); position: relative; }
+.deadline-card span.date-tag { color: var(--primary); font-size: 10px; font-weight: 700; }
+.deadline-card strong { display: block; margin: 12px 0 6px; font-size: 13px; }
+.deadline-card p { color: var(--muted); font-size: 9px; margin: 0; line-height: 1.5; }
+.deadline-card.urgent, .deadline-card.high-priority { border-left: 4px solid var(--red); }
+.deadline-card.medium-priority { border-left: 4px solid var(--amber); }
+.deadline-card.low-priority { border-left: 4px solid var(--green); }
+.deadline-card-top { display: flex; justify-content: space-between; align-items: center; }
+.empty-deadlines { grid-column: 1 / -1; text-align: center; padding: 60px 20px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; color: var(--muted); font-size: 11px; }
 .chat-shell { padding: 0; overflow: hidden; height: 610px; display: flex; flex-direction: column; }
 .chat-messages { flex: 1; padding: 25px; overflow-y: auto; }
 .message { display: flex; gap: 10px; margin-bottom: 18px; max-width: 80%; }

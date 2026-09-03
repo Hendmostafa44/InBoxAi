@@ -20,7 +20,7 @@ understand_mails = Agent(
     Extract:
     - summary: a short and clear summary
     - task: the action the user needs to complete
-    - deadline: the deadline mentioned in the email
+    - deadline: the deadline mentioned in the email (must be in YYYY-MM-DD format). If no deadline is mentioned, use "No deadline".
     and return them in a structured format.
 
     If there is no task, use "No task".
@@ -97,7 +97,6 @@ priority_agent = Agent(
 
 email_workflow = SequentialAgent(
     name="email_workflow",
-    description="Orchestrates the email analysis and prioritization process.",
     sub_agents=[
         understand_mails,
         priority_agent

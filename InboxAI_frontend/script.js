@@ -142,6 +142,7 @@ chatForm.addEventListener("submit", async e => {
         if (typeof pendingTasksCount === "function") pendingTasksCount();
         if (typeof getPriorities === "function") getPriorities();
         if (typeof getTaskCount === "function") getTaskCount();
+        if (typeof getDeadlines === "function") getDeadlines();
 
     } catch (error) {
         console.error("Error:", error);
@@ -278,6 +279,7 @@ async function getAllTasks() {
 
                 getAllTasks();
                 pendingTasksCount();
+                getDeadlines();
             });
         });
 
@@ -288,7 +290,65 @@ async function getAllTasks() {
     }
 }
 
+const priorityRank = {
+    "high": 1,
+    "medium": 2,
+    "low": 3
+};
+
+async function getDeadlines() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/tasks/all`, { headers: getHeaders() });
+        const tasks = await response.json();
+        const deadlineGrid = document.getElementById("deadlineGrid");
+        if (!deadlineGrid) return;
+
+        // Filter pending tasks with valid deadlines
+        const validTasks = tasks.filter(t => 
+            t.deadline && 
+            t.deadline.toLowerCase() !== "no deadline" && 
+            t.deadline.trim() !== "" &&
+            t.status !== "Completed"
+        );
+
+        // Sort strictly by Priority: High (1) -> Medium (2) -> Low (3)
+        validTasks.sort((a, b) => {
+            const pA = priorityRank[(a.priority || "medium").toLowerCase()] || 99;
+            const pB = priorityRank[(b.priority || "medium").toLowerCase()] || 99;
+            return pA - pB;
+        });
+
+        deadlineGrid.innerHTML = "";
+
+        if (validTasks.length === 0) {
+            deadlineGrid.innerHTML = `<div class="empty-deadlines">✦ No upcoming deadlines detected. Add a new task or analyze an email to extract deadlines!</div>`;
+            return;
+        }
+
+        validTasks.forEach(task => {
+            const priority = (task.priority || "medium").toLowerCase();
+            const cardClass = priority === "high" ? "high-priority" : priority === "medium" ? "medium-priority" : "low-priority";
+            const tagClass = priority === "high" ? "red" : priority === "medium" ? "amber" : "green";
+
+            const card = document.createElement("div");
+            card.className = `deadline-card ${cardClass}`;
+            card.innerHTML = `
+                <div class="deadline-card-top">
+                    <span class="date-tag">◷ ${task.deadline}</span>
+                    <span class="tag ${tagClass}">${task.priority} Priority</span>
+                </div>
+                <strong>${task.task}</strong>
+                <p>${task.summary || "Extracted from email inbox"}</p>
+            `;
+            deadlineGrid.appendChild(card);
+        });
+    } catch (err) {
+        console.warn("Deadlines fetch error:", err);
+    }
+}
+
 getAllTasks();
+getDeadlines();
 
 // New Task Modal Logic
 const newTaskModal = document.getElementById("newTaskModal");
@@ -340,6 +400,7 @@ if (newTaskForm) {
             pendingTasksCount();
             getPriorities();
             getTaskCount();
+            getDeadlines();
         } catch (err) {
             console.error("Error creating task:", err);
         }
