@@ -23,7 +23,6 @@
       <nav class="nav">
         <button class="nav-item active" data-page="dashboard"><span>⌂</span> Dashboard</button>
         <button class="nav-item" data-page="inbox"><span>✉</span> Inbox </button>
-        <button class="nav-item" data-page="important"><span>★</span> Important</button>
         <button class="nav-item" data-page="tasks"><span>✓</span> Tasks </button>
         <button class="nav-item" data-page="deadlines"><span>◷</span> Deadlines</button>
         <button class="nav-item" data-page="assistant"><span>✦</span> AI Assistant</button>
@@ -59,8 +58,8 @@
         </div>
 
         <div class="stats-grid">
-          <div class="stat-card"><div class="stat-top"><span class="stat-icon blue">✉</span></span></div><strong id="email-count"></strong><span>Emails</span></div>
-          <div class="stat-card"><div class="stat-top"><span class="stat-icon purple">✓</span></span></div ><strong id="pending_tasks"></strong><span>Pending tasks</span></div>
+          <div class="stat-card"><div class="stat-top"><span class="stat-icon blue">✉</span></div><strong id="email-count">0</strong><span>Emails</span></div>
+          <div class="stat-card"><div class="stat-top"><span class="stat-icon purple">✓</span></div><strong id="pending_tasks">0</strong><span>Pending tasks</span></div>
           <!-- <div class="stat-card"><div class="stat-top"><span class="stat-icon orange">!</span><span class="trend warning">Needs attention</span></div><strong>3</strong><span>Urgent emails</span></div> -->
           <!-- <div class="stat-card"><div class="stat-top"><span class="stat-icon green">◷</span><span class="trend">Next: tomorrow</span></div><strong>4</strong><span>Upcoming deadlines</span></div> -->
         </div>
@@ -89,7 +88,7 @@
           <div>
             <p class="eyebrow">YOUR MAIL</p>
             <h1>Inbox <span class="badge-coming-soon">✨ Live Sync (Coming Soon)</span></h1>
-            <p class="muted">24 messages · 3 need your attention</p>
+            <p class="muted" id="inboxSubtitle">0 messages · no pending items</p>
           </div>
           <div style="display:flex; gap:8px;">
             <button class="secondary-btn feature-badge-btn" disabled title="Feature under active development">🔌 Connect Gmail (Coming Soon)</button>
@@ -108,15 +107,8 @@
 
         <div class="search-row"><div class="search-box">⌕ <input id="emailSearch" placeholder="Search emails..."></div><button class="filter-btn">☷ Filter</button></div>
         <div class="panel email-list" id="emailList">
-          <div class="email-card unread" data-search="google careers internship opportunity selected"><div class="sender-avatar purple-bg">G</div><div class="email-body"><div class="email-line"><strong>Google Careers</strong><span>10:42 AM</span></div><h3>Internship Opportunity</h3><p>You've been selected for the next stage of the AI Engineering internship process.</p><div class="email-meta"><span class="tag red">High Priority</span><span>◷ Tomorrow</span><span>✓ Task detected</span></div></div></div>
-          <div class="email-card unread" data-search="university project submission report deadline"><div class="sender-avatar blue-bg">U</div><div class="email-body"><div class="email-line"><strong>University</strong><span>9:15 AM</span></div><h3>AI Project Submission</h3><p>Please submit your AI project report before the deadline.</p><div class="email-meta"><span class="tag red">High Priority</span><span>◷ Tomorrow</span><span>✓ Task detected</span></div></div></div>
-          <div class="email-card" data-search="ahmed team meeting project"><div class="sender-avatar green-bg">A</div><div class="email-body"><div class="email-line"><strong>Ahmed</strong><span>Yesterday</span></div><h3>Team Meeting</h3><p>Let's schedule our next project meeting and discuss the remaining tasks.</p><div class="email-meta"><span class="tag amber">Medium</span><span>◷ Monday 10:00 AM</span></div></div></div>
+          <!-- Real user emails and AI analyzed items appear here dynamically -->
         </div>
-      </section>
-
-      <section id="important" class="page">
-        <div class="page-heading compact"><div><p class="eyebrow">AI FILTER</p><h1>Important</h1><p class="muted">Messages InboxAI marked as high priority.</p></div></div>
-        <div class="empty-feature"><div class="big-icon">★</div><h2>3 important emails</h2><p>High-priority messages from your inbox will appear here.</p><button class="primary-btn" data-page-target="inbox">View inbox</button></div>
       </section>
 
       <section id="tasks" class="page">

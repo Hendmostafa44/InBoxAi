@@ -49,7 +49,8 @@ if (search) {
   search.addEventListener("input", () => {
     const q = search.value.toLowerCase().trim();
     document.querySelectorAll("#emailList .email-card").forEach(card => {
-      card.style.display = card.dataset.search.includes(q) ? "flex" : "none";
+      const searchTarget = ((card.dataset.search || "") + " " + card.textContent).toLowerCase();
+      card.style.display = searchTarget.includes(q) ? "flex" : "none";
     });
   });
 }
@@ -73,10 +74,18 @@ async function getTaskCount() {
     try {
         const response = await fetch(`${API_BASE_URL}/tasks/count`, { headers: getHeaders() });
         const data = await response.json();
+        const count = (data && typeof data.count === 'number') ? data.count : 0;
         const countEl = document.getElementById("email-count");
-        if (countEl) countEl.textContent = data.count || 24;
+        if (countEl) countEl.textContent = count;
+
+        const inboxSubtitle = document.getElementById("inboxSubtitle");
+        if (inboxSubtitle) {
+            inboxSubtitle.textContent = `${count} messages · ${count > 0 ? 'AI prioritized' : 'no pending items'}`;
+        }
     } catch (err) {
         console.warn("Task count fetch error:", err);
+        const countEl = document.getElementById("email-count");
+        if (countEl) countEl.textContent = 0;
     }
 }
 
@@ -226,12 +235,24 @@ async function getAllTasks() {
         const todoCount = document.getElementById("todo-count");
         const completedList = document.getElementById("completed-list");
         const completedCount = document.getElementById("completed-count");
+        const emailList = document.getElementById("emailList");
 
         if (todoList) todoList.innerHTML = "";
         if (completedList) completedList.innerHTML = "";
+        if (emailList) emailList.innerHTML = "";
 
         let pendingNum = 0;
         let completedNum = 0;
+
+        if (emailList && tasks.length === 0) {
+            emailList.innerHTML = `
+                <div class="empty-feature" style="padding: 50px 20px;">
+                    <div class="big-icon">✉</div>
+                    <h2>Your Inbox is Clear</h2>
+                    <p>No analyzed emails yet. Use the AI Assistant or Add New Task to populate your inbox!</p>
+                </div>
+            `;
+        }
 
         tasks.forEach(task => {
             const priority = (task.priority || "medium").toLowerCase();
@@ -244,6 +265,7 @@ async function getAllTasks() {
                 pendingNum++;
             }
 
+            // Render Task item
             const taskElement = document.createElement("div");
             taskElement.className = `task ${isCompleted ? "done" : ""}`;
 
@@ -281,6 +303,37 @@ async function getAllTasks() {
                 pendingTasksCount();
                 getDeadlines();
             });
+
+            // Render Real Email Card dynamically on Inbox page
+            if (emailList) {
+                const titleText = task.summary || task.task || "Email Item";
+                const firstLetter = titleText.charAt(0).toUpperCase();
+                const avatarColors = ["purple-bg", "blue-bg", "green-bg"];
+                const colorClass = avatarColors[Math.abs(firstLetter.charCodeAt(0)) % avatarColors.length];
+                const searchStr = `${task.task} ${task.summary || ''} ${task.deadline} ${task.priority} ${task.status}`.toLowerCase();
+
+                const emailCard = document.createElement("div");
+                emailCard.className = `email-card ${isCompleted ? "" : "unread"}`;
+                emailCard.setAttribute("data-search", searchStr);
+
+                emailCard.innerHTML = `
+                    <div class="sender-avatar ${colorClass}">${firstLetter}</div>
+                    <div class="email-body">
+                        <div class="email-line">
+                            <strong>${task.summary || "Email Summary"}</strong>
+                            <span>${task.deadline || "Today"}</span>
+                        </div>
+                        <h3>${task.task}</h3>
+                        <p>${task.summary ? "AI Summary: " + task.summary : "Action item extracted by InboxAI."}</p>
+                        <div class="email-meta">
+                            <span class="tag ${tagClass}">${task.priority} Priority</span>
+                            <span>◷ ${task.deadline}</span>
+                            <span>${isCompleted ? "✓ Completed" : "✓ Task detected"}</span>
+                        </div>
+                    </div>
+                `;
+                emailList.appendChild(emailCard);
+            }
         });
 
         if (todoCount) todoCount.textContent = pendingNum;
