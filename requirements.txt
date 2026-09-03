@@ -1,5 +1,7 @@
 # InboxAI Project Requirements
 fastapi[standard]>=0.110.0
+fastapi-cli>=0.0.1
+python-multipart>=0.0.9
 uvicorn>=0.28.0
 redis>=5.0.0
 google-adk>=2.7.0

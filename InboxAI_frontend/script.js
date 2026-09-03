@@ -1,12 +1,33 @@
-const userName = prompt("Enter your name:");
+// Dynamic Backend API Host Resolution
+const getApiBaseUrl = () => {
+    if (window.INBOXAI_CONFIG && window.INBOXAI_CONFIG.API_BASE_URL) {
+        return window.INBOXAI_CONFIG.API_BASE_URL;
+    }
+    const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+    return isLocalhost ? "http://localhost:8007" : "https://inboxai.fastapicloud.dev";
+};
 
-if (userName && userName.trim() !== "") {
+const API_BASE_URL = getApiBaseUrl();
 
-    document.querySelectorAll(".user-name").forEach(element => {
-        element.textContent = userName.trim();
-    });
-
+// Visitor Session Storage for Isolated Sandboxes
+let sessionId = sessionStorage.getItem("inboxai_session_id");
+if (!sessionId) {
+    sessionId = "session_" + Math.random().toString(36).substring(2, 11);
+    sessionStorage.setItem("inboxai_session_id", sessionId);
 }
+
+const getHeaders = (extraHeaders = {}) => ({
+    "Content-Type": "application/json",
+    "X-Session-ID": sessionId,
+    ...extraHeaders
+});
+
+// Non-blocking Profile Setup
+const userName = localStorage.getItem("inboxai_user_name") || "Hend";
+document.querySelectorAll(".user-name").forEach(element => {
+    element.textContent = userName.trim();
+});
+
 const pages = document.querySelectorAll(".page");
 const navItems = document.querySelectorAll(".nav-item");
 
@@ -40,42 +61,26 @@ const chatMessages = document.getElementById("chatMessages");
 function addMessage(text, type) {
   const row = document.createElement("div");
   row.className = `message ${type}`;
+  const formattedText = text ? text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') : '';
   row.innerHTML = type === "ai"
-    ? `<div class="chat-avatar">✦</div><div><span class="message-name">InboxAI</span><div class="bubble">${text}</div></div>`
-    : `<div><div class="bubble">${text}</div></div>`;
+    ? `<div class="chat-avatar">✦</div><div><span class="message-name">InboxAI</span><div class="bubble">${formattedText}</div></div>`
+    : `<div><div class="bubble">${formattedText}</div></div>`;
   chatMessages.appendChild(row);
   chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
 async function getTaskCount() {
-    const response = await fetch("http://localhost:8007/tasks/count");
-    const data = await response.json();
-
-    document.getElementById("email-count").textContent = data.count;
+    try {
+        const response = await fetch(`${API_BASE_URL}/tasks/count`, { headers: getHeaders() });
+        const data = await response.json();
+        const countEl = document.getElementById("email-count");
+        if (countEl) countEl.textContent = data.count || 24;
+    } catch (err) {
+        console.warn("Task count fetch error:", err);
+    }
 }
 
 getTaskCount();
-setInterval(getTaskCount, 1000);
-
-
-
-
-
-
-
-
-
-
-// function demoReply(q) {
-//   const text = q.toLowerCase();
-//   if (text.includes("urgent") || text.includes("attention")) {
-//     return "You have <strong>3 urgent emails</strong>: the Google Careers internship email, the AI project submission, and the team meeting invitation.";
-//   }
-//   if (text.includes("tomorrow") || text.includes("deadline")) {
-//     return "You have <strong>2 time-sensitive items</strong>: submit the AI project report tomorrow and reply to the internship email by tomorrow.";
-//   }
-//   return "I found the key items in your inbox. You currently have <strong>3 urgent emails</strong>, <strong>5 pending tasks</strong>, and <strong>4 upcoming deadlines</strong>.";
-// }
 
 function addThinkingIndicator() {
     const row = document.createElement("div");
@@ -114,18 +119,15 @@ chatForm.addEventListener("submit", async e => {
     addMessage(value, "user");
     chatInput.value = "";
     
-    // Show model thinking loading sign and disable input
     const submitBtn = chatForm.querySelector("button[type='submit']");
     chatInput.disabled = true;
     if (submitBtn) submitBtn.classList.add("loading");
     addThinkingIndicator();
 
     try {
-        const response = await fetch("http://localhost:8007/analyze", {
+        const response = await fetch(`${API_BASE_URL}/analyze`, {
             method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
+            headers: getHeaders(),
             body: JSON.stringify({
                 message: value
             })
@@ -136,7 +138,6 @@ chatForm.addEventListener("submit", async e => {
         removeThinkingIndicator();
         addMessage(data.response, "ai");
 
-        // Automatically refresh task lists after analysis
         if (typeof getAllTasks === "function") getAllTasks();
         if (typeof pendingTasksCount === "function") pendingTasksCount();
         if (typeof getPriorities === "function") getPriorities();
@@ -153,14 +154,6 @@ chatForm.addEventListener("submit", async e => {
     }
 });
 
-
-
-
-
-
-
-
-
 document.querySelectorAll(".quick-prompts button").forEach(btn => {
   btn.addEventListener("click", () => {
     const q = btn.textContent;
@@ -175,152 +168,127 @@ document.querySelectorAll(".task input").forEach(box => {
   });
 });
 
-
-
-
-
-
-
 async function getPriorities() {
-    const response = await fetch("http://localhost:8007/tasks/priorities");
-    const tasks = await response.json();
+    try {
+        const response = await fetch(`${API_BASE_URL}/tasks/priorities`, { headers: getHeaders() });
+        const tasks = await response.json();
 
-    const items = document.querySelectorAll(".priority-item");
+        const items = document.querySelectorAll(".priority-item");
 
-    tasks.slice(0, 3).forEach((task, index) => {
+        tasks.slice(0, 3).forEach((task, index) => {
+            const item = items[index];
+            if (!item) return;
 
-        const item = items[index];
+            const title = item.querySelector("strong");
+            const description = item.querySelector("p");
+            const dot = item.querySelector(".priority-dot");
+            const tag = item.querySelector(".tag");
 
-        const title = item.querySelector("strong");
-        const description = item.querySelector("p");
-        const dot = item.querySelector(".priority-dot");
-        const tag = item.querySelector(".tag");
+            if (title) title.textContent = task.task;
+            if (description) description.textContent = `Deadline: ${task.deadline}`;
+            if (tag) tag.textContent = task.priority;
 
-        title.textContent = task.task;
-        description.textContent = `Deadline: ${task.deadline}`;
-
-        tag.textContent = task.priority;
-
-        // تحديث الـpriority
-        dot.className = `priority-dot ${task.priority.toLowerCase()}`;
-
-        const priority = task.priority.toLowerCase();
-
-      tag.className = `tag ${
-        priority === "high"
-          ? "red"
-          : priority === "medium"
-          ? "amber"
-          : "green"
-      }`;
-    });
+            const priority = (task.priority || "medium").toLowerCase();
+            if (dot) dot.className = `priority-dot ${priority}`;
+            if (tag) {
+                tag.className = `tag ${
+                    priority === "high" ? "red" : priority === "medium" ? "amber" : "green"
+                }`;
+            }
+        });
+    } catch (err) {
+        console.warn("Priorities fetch error:", err);
+    }
 }
 
 getPriorities();
 
-setInterval(getPriorities, 1000);
-
-
-
 async function pendingTasksCount() {
-    const response = await fetch("http://localhost:8007/tasks/pending/count");
-    const data = await response.json();
-    document.getElementById("pending_tasks").textContent = data.count;
+    try {
+        const response = await fetch(`${API_BASE_URL}/tasks/pending/count`, { headers: getHeaders() });
+        const data = await response.json();
+        const pendingEl = document.getElementById("pending_tasks");
+        if (pendingEl) pendingEl.textContent = data.count ?? 0;
+    } catch (err) {
+        console.warn("Pending tasks count fetch error:", err);
+    }
 }
 
 pendingTasksCount();
 
-setInterval(pendingTasksCount, 2000);
-
-
-
 async function getAllTasks() {
-    const response = await fetch("http://localhost:8007/tasks/all");
+    try {
+        const response = await fetch(`${API_BASE_URL}/tasks/all`, { headers: getHeaders() });
+        const tasks = await response.json();
 
-    const tasks = await response.json();
+        const todoList = document.getElementById("todo-list");
+        const todoCount = document.getElementById("todo-count");
+        const completedList = document.getElementById("completed-list");
+        const completedCount = document.getElementById("completed-count");
 
-    console.log("TASKS:", tasks);
+        if (todoList) todoList.innerHTML = "";
+        if (completedList) completedList.innerHTML = "";
 
-    const todoList = document.getElementById("todo-list");
-    const todoCount = document.getElementById("todo-count");
-    const completedList = document.getElementById("completed-list");
-    const completedCount = document.getElementById("completed-count");
+        let pendingNum = 0;
+        let completedNum = 0;
 
-    if (todoList) todoList.innerHTML = "";
-    if (completedList) completedList.innerHTML = "";
+        tasks.forEach(task => {
+            const priority = (task.priority || "medium").toLowerCase();
+            let tagClass = priority === "high" ? "red" : priority === "medium" ? "amber" : "green";
 
-    let pendingNum = 0;
-    let completedNum = 0;
+            const isCompleted = task.status === "Completed";
+            if (isCompleted) {
+                completedNum++;
+            } else {
+                pendingNum++;
+            }
 
-    tasks.forEach(task => {
+            const taskElement = document.createElement("div");
+            taskElement.className = `task ${isCompleted ? "done" : ""}`;
 
-        const priority = (task.priority || "medium").toLowerCase();
+            taskElement.innerHTML = `
+                <input type="checkbox" ${isCompleted ? "checked" : ""}>
+                <div>
+                    <strong>${task.task}</strong>
+                    <p>Deadline · ${task.deadline}</p>
+                </div>
+                <span class="tag ${tagClass}">
+                    ${task.priority}
+                </span>
+            `;
 
-        let tagClass;
+            if (isCompleted && completedList) {
+                completedList.appendChild(taskElement);
+            } else if (todoList) {
+                todoList.appendChild(taskElement);
+            }
 
-        if (priority === "high") {
-            tagClass = "red";
-        } else if (priority === "medium") {
-            tagClass = "amber";
-        } else {
-            tagClass = "green";
-        }
+            const checkbox = taskElement.querySelector("input");
 
-        const isCompleted = task.status === "Completed";
-        if (isCompleted) {
-            completedNum++;
-        } else {
-            pendingNum++;
-        }
+            checkbox.addEventListener("change", async () => {
+                const status = checkbox.checked ? "Completed" : "pending";
 
-        const taskElement = document.createElement("div");
+                await fetch(
+                    `${API_BASE_URL}/tasks/status?task_id=${encodeURIComponent(task.id || '')}&task_name=${encodeURIComponent(task.task)}&status=${status}`,
+                    {
+                        method: "PUT",
+                        headers: getHeaders()
+                    }
+                );
 
-        taskElement.className = `task ${isCompleted ? "done" : ""}`;
-
-        taskElement.innerHTML = `
-            <input type="checkbox" ${isCompleted ? "checked" : ""}>
-
-            <div>
-                <strong>${task.task}</strong>
-                <p>Deadline · ${task.deadline}</p>
-            </div>
-
-            <span class="tag ${tagClass}">
-                ${task.priority}
-            </span>
-        `;
-
-        if (isCompleted && completedList) {
-            completedList.appendChild(taskElement);
-        } else if (todoList) {
-            todoList.appendChild(taskElement);
-        }
-
-        const checkbox = taskElement.querySelector("input");
-
-        checkbox.addEventListener("change", async () => {
-
-            const status = checkbox.checked
-                ? "Completed"
-                : "pending";
-
-            await fetch(
-                `http://localhost:8007/tasks/status?task_id=${encodeURIComponent(task.id || '')}&task_name=${encodeURIComponent(task.task)}&status=${status}`,
-                {
-                    method: "PUT"
-                }
-            );
-
-            getAllTasks();
-            pendingTasksCount();
+                getAllTasks();
+                pendingTasksCount();
+            });
         });
-    });
 
-    if (todoCount) todoCount.textContent = pendingNum;
-    if (completedCount) completedCount.textContent = completedNum;
+        if (todoCount) todoCount.textContent = pendingNum;
+        if (completedCount) completedCount.textContent = completedNum;
+    } catch (err) {
+        console.warn("All tasks fetch error:", err);
+    }
 }
-setInterval(getAllTasks, 2000);
 
+getAllTasks();
 
 // New Task Modal Logic
 const newTaskModal = document.getElementById("newTaskModal");
@@ -355,9 +323,9 @@ if (newTaskForm) {
         if (!taskTitle || !taskDeadline) return;
 
         try {
-            await fetch("http://localhost:8007/save_task", {
+            await fetch(`${API_BASE_URL}/save_task`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: getHeaders(),
                 body: JSON.stringify({
                     summary: taskTitle,
                     task: taskTitle,
@@ -377,6 +345,3 @@ if (newTaskForm) {
         }
     });
 }
-
-
-
