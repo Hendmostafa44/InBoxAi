@@ -1,5 +1,5 @@
 # InboxAI Project Requirements
-fastapi>=0.110.0
+fastapi[standard]>=0.110.0
 uvicorn>=0.28.0
 redis>=5.0.0
 google-adk>=2.7.0
