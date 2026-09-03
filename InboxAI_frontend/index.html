@@ -94,7 +94,27 @@
       </section>
 
       <section id="inbox" class="page">
-        <div class="page-heading compact"><div><p class="eyebrow">YOUR MAIL</p><h1>Inbox</h1><p class="muted">24 messages · 3 need your attention</p></div><button class="primary-btn" data-page-target="assistant">✦ Ask AI</button></div>
+        <div class="page-heading compact">
+          <div>
+            <p class="eyebrow">YOUR MAIL</p>
+            <h1>Inbox <span class="badge-coming-soon">✨ Live Sync (Coming Soon)</span></h1>
+            <p class="muted">24 messages · 3 need your attention</p>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button class="secondary-btn feature-badge-btn" disabled title="Feature under active development">🔌 Connect Gmail (Coming Soon)</button>
+            <button class="primary-btn" data-page-target="assistant">✦ Ask AI</button>
+          </div>
+        </div>
+
+        <div class="future-features-banner">
+          <div class="future-icon">🚀</div>
+          <div>
+            <strong>Future Inbox Features (v2.0 Roadmap)</strong>
+            <p>Real-time Gmail OAuth sync, automated AI reply drafting, and multi-inbox smart rules are coming soon!</p>
+          </div>
+          <span class="tag-soon">Coming Soon</span>
+        </div>
+
         <div class="search-row"><div class="search-box">⌕ <input id="emailSearch" placeholder="Search emails..."></div><button class="filter-btn">☷ Filter</button></div>
         <div class="panel email-list" id="emailList">
           <div class="email-card unread" data-search="google careers internship opportunity selected"><div class="sender-avatar purple-bg">G</div><div class="email-body"><div class="email-line"><strong>Google Careers</strong><span>10:42 AM</span></div><h3>Internship Opportunity</h3><p>You've been selected for the next stage of the AI Engineering internship process.</p><div class="email-meta"><span class="tag red">High Priority</span><span>◷ Tomorrow</span><span>✓ Task detected</span></div></div></div>
@@ -109,7 +129,7 @@
       </section>
 
       <section id="tasks" class="page">
-        <div class="page-heading compact"><div><p class="eyebrow">ACTION ITEMS</p><h1>Tasks</h1><p class="muted">Tasks automatically extracted from your emails.</p></div><button class="primary-btn">＋ New task</button></div>
+        <div class="page-heading compact"><div><p class="eyebrow">ACTION ITEMS</p><h1>Tasks</h1><p class="muted">Tasks automatically extracted from your emails.</p></div><button class="primary-btn" id="openNewTaskModal">＋ New task</button></div>
         <div class="task-columns">
           <div class="panel">
               <div class="panel-head">
@@ -120,9 +140,11 @@
                   <!-- Tasks will appear here -->
               </div>
           </div>
-          <div class="panel"><div class="panel-head"><h2>Completed <span class="count">2</span></h2></div>
-            <div class="task done"><input type="checkbox" checked><div><strong>Send project files</strong><p>Completed today</p></div></div>
-            <div class="task done"><input type="checkbox" checked><div><strong>Reply to university email</strong><p>Completed yesterday</p></div></div>
+          <div class="panel">
+            <div class="panel-head"><h2>Completed <span class="count" id="completed-count">0</span></h2></div>
+            <div id="completed-list">
+              <!-- Completed tasks will appear here dynamically -->
+            </div>
           </div>
         </div>
       </section>
@@ -157,6 +179,38 @@
       </section>
     </main>
   </div>
+
+  <div id="newTaskModal" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2>✦ Create New Task</h2>
+        <button type="button" class="close-modal-btn" id="closeNewTaskModal">✕</button>
+      </div>
+      <form id="newTaskForm" class="modal-form">
+        <div class="form-group">
+          <label for="taskTitleInput">Task Description</label>
+          <input type="text" id="taskTitleInput" placeholder="e.g. Reply to Google Careers email" required>
+        </div>
+        <div class="form-group">
+          <label for="taskDeadlineInput">Deadline</label>
+          <input type="text" id="taskDeadlineInput" placeholder="e.g. Tomorrow 5 PM or Aug 20" required>
+        </div>
+        <div class="form-group">
+          <label for="taskPriorityInput">Priority</label>
+          <select id="taskPriorityInput">
+            <option value="High">High Priority</option>
+            <option value="Medium" selected>Medium Priority</option>
+            <option value="Low">Low Priority</option>
+          </select>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="secondary-btn" id="cancelNewTaskModal">Cancel</button>
+          <button type="submit" class="primary-btn">Save Task</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <script src="script.js"></script>
 </body>
 </html>

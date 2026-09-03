@@ -32,7 +32,9 @@ async def create_task(task: str, deadline: str, priority: str) -> dict:
 
 
 def save_task(summary: str, task: str, deadline: str, priority: str) -> dict:
+    import uuid
     email = json.dumps({
+        "id": str(uuid.uuid4()),
         "summary": summary,
         "task": task,
         "deadline": deadline,

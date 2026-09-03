@@ -77,6 +77,34 @@ setInterval(getTaskCount, 1000);
 //   return "I found the key items in your inbox. You currently have <strong>3 urgent emails</strong>, <strong>5 pending tasks</strong>, and <strong>4 upcoming deadlines</strong>.";
 // }
 
+function addThinkingIndicator() {
+    const row = document.createElement("div");
+    row.id = "thinkingIndicator";
+    row.className = "message ai thinking-message";
+    row.innerHTML = `
+        <div class="chat-avatar">✦</div>
+        <div>
+            <span class="message-name">InboxAI</span>
+            <div class="bubble">
+                <span>InboxAI is thinking</span>
+                <div class="thinking-dots">
+                    <div class="thinking-dot"></div>
+                    <div class="thinking-dot"></div>
+                    <div class="thinking-dot"></div>
+                </div>
+            </div>
+        </div>
+    `;
+    chatMessages.appendChild(row);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+    return row;
+}
+
+function removeThinkingIndicator() {
+    const indicator = document.getElementById("thinkingIndicator");
+    if (indicator) indicator.remove();
+}
+
 chatForm.addEventListener("submit", async e => {
     e.preventDefault();
 
@@ -85,6 +113,12 @@ chatForm.addEventListener("submit", async e => {
 
     addMessage(value, "user");
     chatInput.value = "";
+    
+    // Show model thinking loading sign and disable input
+    const submitBtn = chatForm.querySelector("button[type='submit']");
+    chatInput.disabled = true;
+    if (submitBtn) submitBtn.classList.add("loading");
+    addThinkingIndicator();
 
     try {
         const response = await fetch("http://localhost:8007/analyze", {
@@ -99,11 +133,23 @@ chatForm.addEventListener("submit", async e => {
 
         const data = await response.json();
 
+        removeThinkingIndicator();
         addMessage(data.response, "ai");
+
+        // Automatically refresh task lists after analysis
+        if (typeof getAllTasks === "function") getAllTasks();
+        if (typeof pendingTasksCount === "function") pendingTasksCount();
+        if (typeof getPriorities === "function") getPriorities();
+        if (typeof getTaskCount === "function") getTaskCount();
 
     } catch (error) {
         console.error("Error:", error);
-        addMessage("Sorry, something went wrong.", "ai");
+        removeThinkingIndicator();
+        addMessage("Sorry, something went wrong while processing your request.", "ai");
+    } finally {
+        chatInput.disabled = false;
+        if (submitBtn) submitBtn.classList.remove("loading");
+        chatInput.focus();
     }
 });
 
@@ -197,13 +243,18 @@ async function getAllTasks() {
 
     const todoList = document.getElementById("todo-list");
     const todoCount = document.getElementById("todo-count");
+    const completedList = document.getElementById("completed-list");
+    const completedCount = document.getElementById("completed-count");
 
-    todoList.innerHTML = "";
-    todoCount.textContent = tasks.length;
+    if (todoList) todoList.innerHTML = "";
+    if (completedList) completedList.innerHTML = "";
+
+    let pendingNum = 0;
+    let completedNum = 0;
 
     tasks.forEach(task => {
 
-        const priority = task.priority.toLowerCase();
+        const priority = (task.priority || "medium").toLowerCase();
 
         let tagClass;
 
@@ -215,12 +266,19 @@ async function getAllTasks() {
             tagClass = "green";
         }
 
+        const isCompleted = task.status === "Completed";
+        if (isCompleted) {
+            completedNum++;
+        } else {
+            pendingNum++;
+        }
+
         const taskElement = document.createElement("div");
 
-        taskElement.className = "task";
+        taskElement.className = `task ${isCompleted ? "done" : ""}`;
 
         taskElement.innerHTML = `
-            <input type="checkbox" ${task.status === "Completed" ? "checked" : ""}>
+            <input type="checkbox" ${isCompleted ? "checked" : ""}>
 
             <div>
                 <strong>${task.task}</strong>
@@ -232,7 +290,11 @@ async function getAllTasks() {
             </span>
         `;
 
-        todoList.appendChild(taskElement);
+        if (isCompleted && completedList) {
+            completedList.appendChild(taskElement);
+        } else if (todoList) {
+            todoList.appendChild(taskElement);
+        }
 
         const checkbox = taskElement.querySelector("input");
 
@@ -243,7 +305,7 @@ async function getAllTasks() {
                 : "pending";
 
             await fetch(
-                `http://localhost:8007/tasks/status?task_name=${encodeURIComponent(task.task)}&status=${status}`,
+                `http://localhost:8007/tasks/status?task_id=${encodeURIComponent(task.id || '')}&task_name=${encodeURIComponent(task.task)}&status=${status}`,
                 {
                     method: "PUT"
                 }
@@ -253,8 +315,68 @@ async function getAllTasks() {
             pendingTasksCount();
         });
     });
+
+    if (todoCount) todoCount.textContent = pendingNum;
+    if (completedCount) completedCount.textContent = completedNum;
+}
+setInterval(getAllTasks, 2000);
+
+
+// New Task Modal Logic
+const newTaskModal = document.getElementById("newTaskModal");
+const openNewTaskBtn = document.getElementById("openNewTaskModal");
+const closeNewTaskBtn = document.getElementById("closeNewTaskModal");
+const cancelNewTaskBtn = document.getElementById("cancelNewTaskModal");
+const newTaskForm = document.getElementById("newTaskForm");
+
+function toggleModal(show) {
+    if (newTaskModal) {
+        newTaskModal.classList.toggle("active", show);
+    }
+}
+
+if (openNewTaskBtn) openNewTaskBtn.addEventListener("click", () => toggleModal(true));
+if (closeNewTaskBtn) closeNewTaskBtn.addEventListener("click", () => toggleModal(false));
+if (cancelNewTaskBtn) cancelNewTaskBtn.addEventListener("click", () => toggleModal(false));
+
+if (newTaskModal) {
+    newTaskModal.addEventListener("click", (e) => {
+        if (e.target === newTaskModal) toggleModal(false);
+    });
+}
+
+if (newTaskForm) {
+    newTaskForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const taskTitle = document.getElementById("taskTitleInput").value.trim();
+        const taskDeadline = document.getElementById("taskDeadlineInput").value.trim();
+        const taskPriority = document.getElementById("taskPriorityInput").value;
+
+        if (!taskTitle || !taskDeadline) return;
+
+        try {
+            await fetch("http://localhost:8007/save_task", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    summary: taskTitle,
+                    task: taskTitle,
+                    deadline: taskDeadline,
+                    priority: taskPriority
+                })
+            });
+
+            newTaskForm.reset();
+            toggleModal(false);
+            getAllTasks();
+            pendingTasksCount();
+            getPriorities();
+            getTaskCount();
+        } catch (err) {
+            console.error("Error creating task:", err);
+        }
+    });
 }
 
 
-getAllTasks();
 

@@ -27,6 +27,7 @@ understand_mails = Agent(
     If there is no deadline, use "No deadline".
 
     Do not invent information.
+    
     """,
     output_key="mail_analysis",
     tools=[]
@@ -96,10 +97,35 @@ priority_agent = Agent(
 
 email_workflow = SequentialAgent(
     name="email_workflow",
+    description="Orchestrates the email analysis and prioritization process.",
     sub_agents=[
         understand_mails,
         priority_agent
     ]
 )
 
-root_agent = email_workflow
+orchestrator = Agent(
+    model="gemini-3.5-flash-lite",
+    name="orchestrator",
+    description="Orchestrates the email analysis and prioritization process.",
+    instruction="""
+    You are the Registration Agent for InboxAI.
+
+Your job is to classify the user's message and decide whether it is a casual conversation or an email-management request.
+
+Rules:
+
+1. If the user sends a casual message such as "Hi", "Hello", "Hey", "How are you?", or general conversation, respond naturally and politely. Do NOT save it, analyze it as an email, or call any other agent.
+2. If the user provides an email or asks to analyze, summarize, prioritize, or extract tasks/deadlines from an email, route the request to the InboxAI email-processing workflow.
+3. Do not modify, summarize, or cut off the user's message.
+4. Do not create or save tasks for casual messages.
+5. When the message is ambiguous, treat it as casual conversation unless there is clear evidence that it is an email-management request.
+6. Keep your response concise and natural.
+
+Your main responsibility is routing, not email analysis.
+
+    """,
+    sub_agents=[email_workflow]
+)
+
+root_agent = orchestrator

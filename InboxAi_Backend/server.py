@@ -43,6 +43,7 @@ class MailSummary(BaseModel):
 async def save_task(mail_summary: MailSummary):
 
     email = json.dumps({
+        "id": str(uuid.uuid4()),
         "summary": mail_summary.summary,
         "task": mail_summary.task,
         "deadline": mail_summary.deadline,
@@ -147,28 +148,36 @@ async def get_priorities():
 
 @app.get("/tasks/all")
 async def get_all_tasks():
-    tasks = r.lrange("emails", 0, -1)
+    raw_tasks = r.lrange("emails", 0, -1)
+    parsed_tasks = []
 
-    return [json.loads(task) for task in tasks]
+    for index, task_str in enumerate(raw_tasks):
+        task_data = json.loads(task_str)
+        if "id" not in task_data:
+            task_data["id"] = str(uuid.uuid4())
+            r.lset("emails", index, json.dumps(task_data))
+        parsed_tasks.append(task_data)
+
+    return parsed_tasks
 
 
 
 @app.put("/tasks/status")
-async def update_task_status(task_name: str, status: str):
+async def update_task_status(task_name: str | None = None, status: str = "pending", task_id: str | None = None):
     tasks = r.lrange("emails", 0, -1)
 
     for index, task in enumerate(tasks):
         task_data = json.loads(task)
 
-        if task_data.get("task") == task_name:
+        is_match = False
+        if task_id and task_data.get("id") == task_id:
+            is_match = True
+        elif task_name and task_data.get("task") == task_name:
+            is_match = True
+
+        if is_match:
             task_data["status"] = status
-
-            r.lset(
-                "emails",
-                index,
-                json.dumps(task_data)
-            )
-
+            r.lset("emails", index, json.dumps(task_data))
             return {
                 "message": "Task status updated",
                 "status": status
