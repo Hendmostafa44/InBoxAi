@@ -5,11 +5,11 @@ from google.adk.agents import SequentialAgent
 from tools.tools import get_current_datetime
 from tools.tools import create_task
 from tools.tools import save_task
-
-
+model=LiteLlm("openrouter/meta/muse-spark-1.2",max_tokens=4096)
+#model="gemini-3.5-flash-lite"
 
 understand_mails = Agent(
-    model="gemini-3.5-flash-lite",
+    model=model,
     name="understand_mails",
     description="Analyzes emails and extracts their summary, tasks, and deadlines.",
     instruction="""
@@ -35,7 +35,7 @@ understand_mails = Agent(
 
 
 priority_agent = Agent(
-    model="gemini-3.5-flash-lite",
+    model=model,
     name="priority_agent",
     description="Determines task priority based on the deadline.",
     instruction="""
@@ -104,7 +104,7 @@ email_workflow = SequentialAgent(
 )
 
 orchestrator = Agent(
-    model="gemini-3.5-flash-lite",
+    model=model,
     name="orchestrator",
     description="Orchestrates the email analysis and prioritization process.",
     instruction="""
