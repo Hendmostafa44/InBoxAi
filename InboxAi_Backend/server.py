@@ -31,6 +31,19 @@ r = redis.Redis(
     password=os.getenv("REDIS_PASSWORD"),
     decode_responses=True
 )
+@app.get("/test-redis")
+async def test_redis():
+    try:
+        result = r.ping()
+        return {
+            "redis": "connected",
+            "ping": result
+        }
+    except Exception as e:
+        return {
+            "redis": "error",
+            "message": str(e)
+        }
 
 class MailSummary(BaseModel):
     summary: str
@@ -38,6 +51,9 @@ class MailSummary(BaseModel):
     deadline: str
     priority: str
 
+
+class UserRequest(BaseModel):
+    name: str
 
 @app.post("/save_task")
 async def save_task(mail_summary: MailSummary):
@@ -195,7 +211,36 @@ async def get_urgent_tasks():
             count += 1
     return count
     
+@app.post("/users/login")
+async def login_user(user: UserRequest):
 
+    name = user.name.strip()
+
+    if not name:
+        return {
+            "success": False,
+            "message": "Name is required"
+        }
+
+    users_key = "users"
+    user_emails_key = f"user:{name}:emails"
+
+    exists = r.sismember(users_key, name)
+
+    if not exists:
+        r.sadd(users_key, name)
+
+        return {
+            "success": True,
+            "new_user": True,
+            "name": name
+        }
+
+    return {
+        "success": True,
+        "new_user": False,
+        "name": name
+    }
 
 if __name__ == "__main__":
     import uvicorn
