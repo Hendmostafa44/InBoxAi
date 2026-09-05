@@ -344,3 +344,67 @@ h3 { font-size: 14px; margin: 7px 0; }
 }
 
 
+.name-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 99999;
+}
+
+.name-card {
+    width: min(90%, 380px);
+    background: #ffffff;
+    padding: 32px;
+    border-radius: 20px;
+    text-align: center;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+}
+
+.name-card h2 {
+    margin-bottom: 10px;
+}
+
+.name-card p {
+    margin-bottom: 15px;
+}
+
+.name-card input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 14px 16px;
+    border: 1px solid #ddd;
+    border-radius: 10px;
+    font-size: 15px;
+    outline: none;
+}
+
+.name-card input:focus {
+    border-color: #6c63ff;
+}
+
+.name-card button {
+    width: 100%;
+    padding: 14px;
+    border: none;
+    border-radius: 10px;
+    background: #6c63ff;
+    color: white;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.name-card button:hover {
+    opacity: 0.9;
+}
+
+.name-error {
+    display: none;
+    color: #d93025;
+    font-size: 13px;
+    text-align: left;
+    margin-top: 8px !important;
+}

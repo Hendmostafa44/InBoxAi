@@ -31,19 +31,7 @@ r = redis.Redis(
     password=os.getenv("REDIS_PASSWORD"),
     decode_responses=True
 )
-@app.get("/test-redis")
-async def test_redis():
-    try:
-        result = r.ping()
-        return {
-            "redis": "connected",
-            "ping": result
-        }
-    except Exception as e:
-        return {
-            "redis": "error",
-            "message": str(e)
-        }
+
 
 class MailSummary(BaseModel):
     summary: str
@@ -56,8 +44,7 @@ class UserRequest(BaseModel):
     name: str
 
 @app.post("/save_task")
-async def save_task(mail_summary: MailSummary):
-
+async def save_task(mail_summary: MailSummary, username: str):
     email = json.dumps({
         "id": str(uuid.uuid4()),
         "summary": mail_summary.summary,
@@ -67,10 +54,14 @@ async def save_task(mail_summary: MailSummary):
         "status": "pending"
     })
 
-    r.rpush("emails", email)
+    redis_key = f"user:{username}:emails"
 
-    return {"message": "Email saved successfully"}
+    r.rpush(redis_key, email)
 
+    return {
+        "message": "Email saved successfully",
+        "username": username
+    }
 import uuid
 session_service = InMemorySessionService()
 
@@ -129,14 +120,19 @@ async def analyze_email(request: EmailRequest):
     }
 
 @app.get("/tasks/count")
-async def get_tasks_count():
-    count = r.llen("emails")
-    return {"count": count}
+async def get_tasks_count(username: str):
+    redis_key = f"user:{username}:emails"
+    count = r.llen(redis_key)
 
+    return {
+        "count": count
+    }
 
 @app.get("/tasks/pending/count")
-async def get_pending_tasks_count():
-    tasks = r.lrange("emails", 0, -1)
+async def get_pending_tasks_count(username: str):
+    redis_key = f"user:{username}:emails"
+
+    tasks = r.lrange(redis_key, 0, -1)
 
     pending_count = sum(
         1
@@ -144,13 +140,16 @@ async def get_pending_tasks_count():
         if json.loads(task).get("status") == "pending"
     )
 
-    return {"count": pending_count}
-
+    return {
+        "count": pending_count
+    }
 
 
 @app.get("/tasks/priorities")
-async def get_priorities():
-    tasks = r.lrange("emails", 0, -1)
+async def get_priorities(username: str):
+    redis_key = f"user:{username}:emails"
+
+    tasks = r.lrange(redis_key, 0, -1)
 
     result = []
 
@@ -162,16 +161,18 @@ async def get_priorities():
 
     return result
 
+
 @app.get("/tasks/all")
-async def get_all_tasks():
-    raw_tasks = r.lrange("emails", 0, -1)
+async def get_all_tasks(username: str):
+    redis_key = f"user:{username}:emails"
+    raw_tasks = r.lrange(redis_key, 0, -1)
     parsed_tasks = []
 
     for index, task_str in enumerate(raw_tasks):
         task_data = json.loads(task_str)
         if "id" not in task_data:
             task_data["id"] = str(uuid.uuid4())
-            r.lset("emails", index, json.dumps(task_data))
+            r.lset(redis_key, index, json.dumps(task_data))
         parsed_tasks.append(task_data)
 
     return parsed_tasks
@@ -179,13 +180,21 @@ async def get_all_tasks():
 
 
 @app.put("/tasks/status")
-async def update_task_status(task_name: str | None = None, status: str = "pending", task_id: str | None = None):
-    tasks = r.lrange("emails", 0, -1)
+async def update_task_status(
+    username: str,
+    task_name: str | None = None,
+    status: str = "pending",
+    task_id: str | None = None
+):
+    redis_key = f"user:{username}:emails"
+
+    tasks = r.lrange(redis_key, 0, -1)
 
     for index, task in enumerate(tasks):
         task_data = json.loads(task)
 
         is_match = False
+
         if task_id and task_data.get("id") == task_id:
             is_match = True
         elif task_name and task_data.get("task") == task_name:
@@ -193,7 +202,8 @@ async def update_task_status(task_name: str | None = None, status: str = "pendin
 
         if is_match:
             task_data["status"] = status
-            r.lset("emails", index, json.dumps(task_data))
+            r.lset(redis_key, index, json.dumps(task_data))
+
             return {
                 "message": "Task status updated",
                 "status": status
@@ -202,13 +212,18 @@ async def update_task_status(task_name: str | None = None, status: str = "pendin
     return {"message": "Task not found"}
 
 @app.get("/tasks/urgent")
-async def get_urgent_tasks():
-    count=0
-    tasks = r.lrange("emails", 0, -1)
+async def get_urgent_tasks(username: str):
+    redis_key = f"user:{username}:emails"
+
+    count = 0
+    tasks = r.lrange(redis_key, 0, -1)
+
     for task in tasks:
         task = json.loads(task)
+
         if task.get("priority") == "High" and task.get("status") == "pending":
             count += 1
+
     return count
     
 @app.post("/users/login")

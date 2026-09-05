@@ -23,11 +23,90 @@ const getHeaders = (extraHeaders = {}) => ({
 });
 
 // Non-blocking Profile Setup
-const userName = localStorage.getItem("inboxai_user_name") || "Hend";
-document.querySelectorAll(".user-name").forEach(element => {
-    element.textContent = userName.trim();
-});
+// User Login / Name Setup
+const nameModal = document.getElementById("name-modal");
+const nameInput = document.getElementById("name-input");
+const saveNameBtn = document.getElementById("save-name-btn");
+const nameError = document.getElementById("name-error");
 
+function updateUserName(name) {
+    document.querySelectorAll(".user-name").forEach(element => {
+        element.textContent = name;
+    });
+
+    const initial = name.charAt(0).toUpperCase();
+
+    document.querySelectorAll(".avatar, .top-avatar").forEach(element => {
+        element.textContent = initial;
+    });
+}
+
+async function loginUser(name) {
+    try {
+        const response = await fetch(`${API_BASE_URL}/users/login`, {
+            method: "POST",
+            headers: getHeaders(),
+            body: JSON.stringify({
+                name: name
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error("Login failed");
+        }
+
+        const data = await response.json();
+
+        if (!data.success) {
+            throw new Error(data.message || "Login failed");
+        }
+
+        localStorage.setItem("inboxai_user_name", data.name);
+
+        updateUserName(data.name);
+
+        return true;
+
+    } catch (error) {
+        console.error("Login error:", error);
+
+        nameError.textContent = "Something went wrong. Please try again.";
+        nameError.style.display = "block";
+
+        return false;
+    }
+}
+
+const savedUserName = localStorage.getItem("inboxai_user_name");
+
+if (savedUserName) {
+    updateUserName(savedUserName);
+    nameModal.style.display = "none";
+} else {
+    nameModal.style.display = "flex";
+}
+
+saveNameBtn.addEventListener("click", async () => {
+
+    const name = nameInput.value.trim();
+
+    if (!name) {
+        nameError.textContent = "Please enter your name.";
+        nameError.style.display = "block";
+        return;
+    }
+
+    nameError.style.display = "none";
+
+    saveNameBtn.disabled = true;
+    saveNameBtn.textContent = "Loading...";
+
+    await loginUser(name);
+
+    saveNameBtn.disabled = false;
+    saveNameBtn.textContent = "Continue";
+});
+// ???????????????????????????????????????
 const pages = document.querySelectorAll(".page");
 const navItems = document.querySelectorAll(".nav-item");
 
@@ -470,6 +549,4 @@ async function updateUrgentCount() {
     }
 }
 updateUrgentCount();
-setInterval(updateUrgentCount, 2000); 
-
-
+setInterval(updateUrgentCount, 2000);
