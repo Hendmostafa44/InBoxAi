@@ -329,6 +329,7 @@ h3 { font-size: 14px; margin: 7px 0; }
 .chat-input button.loading span {
   display: none;
 }
+
 .chat-input button.loading::after {
   content: "";
   width: 12px;
