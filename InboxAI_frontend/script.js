@@ -459,3 +459,15 @@ if (newTaskForm) {
         }
     });
 }
+
+const urgentCountEl = document.getElementById("urgent-emails");
+async function updateUrgentCount() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/tasks/urgent`);
+        urgentCountEl.textContent = await response.text();
+    } catch (err) {
+        console.error("Error updating urgent count:", err);
+    }
+}
+updateUrgentCount();
+setInterval(updateUrgentCount, 2000); 

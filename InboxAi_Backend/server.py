@@ -185,7 +185,16 @@ async def update_task_status(task_name: str | None = None, status: str = "pendin
 
     return {"message": "Task not found"}
 
-
+@app.get("/tasks/urgent")
+async def get_urgent_tasks():
+    count=0
+    tasks = r.lrange("emails", 0, -1)
+    for task in tasks:
+        task = json.loads(task)
+        if task.get("priority") == "High" and task.get("status") == "pending":
+            count += 1
+    return count
+    
 
 
 if __name__ == "__main__":
