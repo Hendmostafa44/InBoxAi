@@ -13,6 +13,10 @@ dependencies = [
     "litellm>=1.30.0",
     "redis>=8.1.0",
     "uvicorn>=0.28.0",
+    "itsdangerous>=2.2.0",
+    "sqlalchemy>=2.0.52",
+    "psycopg[binary]>=3.3.5",
+    "google-api-python-client>=2.200.0",
 ]
 
 [tool.fastapi]
