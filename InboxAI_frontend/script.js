@@ -5,6 +5,7 @@ const getApiBaseUrl = () => {
     }
     const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
     return isLocalhost ? "http://localhost:8007" : "https://inboxai.fastapicloud.dev";
+
 };
 
 const API_BASE_URL = getApiBaseUrl();
@@ -22,11 +23,62 @@ const getHeaders = (extraHeaders = {}) => ({
     ...extraHeaders
 });
 
-// Non-blocking Profile Setup
-const userName = localStorage.getItem("inboxai_user_name") || "Hend";
-document.querySelectorAll(".user-name").forEach(element => {
-    element.textContent = userName.trim();
-});
+// Load authenticated user from server session
+// Load authenticated user from server session
+async function loadCurrentUser() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/auth/me`, {
+            credentials: "include"
+        });
+
+        if (!response.ok) {
+            throw new Error(`Auth request failed: ${response.status}`);
+        }
+
+        const data = await response.json();
+        console.log("AUTH ME DATA:", data);
+
+        if (data.authenticated) {
+
+            const displayName = data.name || data.email || "User";
+            const email = data.email || "";
+
+            // Update all username elements
+            document.querySelectorAll(".user-name").forEach(element => {
+                element.textContent = displayName;
+            });
+
+            // Update all email elements
+            document.querySelectorAll(".user-email").forEach(element => {
+                element.textContent = email;
+            });
+
+            // Get first letter for avatar
+            const firstLetter = displayName
+                .trim()
+                .charAt(0)
+                .toUpperCase() || "U";
+
+            const userAvatar = document.getElementById("userAvatar");
+            if (userAvatar) {
+                userAvatar.textContent = firstLetter;
+            }
+
+            const topAvatar = document.getElementById("topAvatar");
+            if (topAvatar) {
+                topAvatar.textContent = firstLetter;
+            }
+
+        } else {
+            console.log("User is not authenticated.");
+        }
+
+    } catch (error) {
+        console.error("Error loading current user:", error);
+    }
+}
+
+loadCurrentUser();
 
 const pages = document.querySelectorAll(".page");
 const navItems = document.querySelectorAll(".nav-item");
@@ -471,3 +523,12 @@ async function updateUrgentCount() {
 }
 updateUrgentCount();
 setInterval(updateUrgentCount, 2000); 
+
+
+const connectGmailBtn = document.getElementById("connectGmailBtn");
+
+if (connectGmailBtn) {
+    connectGmailBtn.addEventListener("click", () => {
+        window.location.href = "http://localhost:8007/auth/google/login";
+    });
+}
