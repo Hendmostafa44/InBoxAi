@@ -38,7 +38,7 @@ async function loadCurrentUser() {
         const data = await response.json();
         console.log("AUTH ME DATA:", data);
 
-        if (data.authenticated) {
+        if (data.logged_in || data.authenticated) {
 
             const displayName = data.name || data.email || "User";
             const email = data.email || "";
@@ -73,12 +73,193 @@ async function loadCurrentUser() {
             console.log("User is not authenticated.");
         }
 
+        return data;
+
     } catch (error) {
         console.error("Error loading current user:", error);
+        return null;
     }
 }
 
-loadCurrentUser();
+async function loadInboxEmails() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/emails`, {
+            credentials: "include"
+        });
+
+        if (response.status === 401) {
+            return;
+        }
+
+        if (!response.ok) {
+            throw new Error(`Failed to fetch emails: ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        console.log("INBOX EMAILS:", data);
+
+        const emailList = document.getElementById("emailList");
+
+        if (!emailList) return;
+
+        emailList.innerHTML = "";
+
+        if (!data.emails || data.emails.length === 0) {
+            emailList.innerHTML = `
+                <div class="empty-feature" style="padding: 50px 20px;">
+                    <div class="big-icon">✉</div>
+                    <h2>Your Inbox is Clear</h2>
+                    <p>No emails found in your Gmail inbox.</p>
+                </div>
+            `;
+            return;
+        }
+
+        data.emails.forEach(email => {
+
+            const senderText = email.sender || "Unknown Sender";
+
+            const senderName = senderText
+                .replace(/<.*?>/g, "")
+                .replace(/"/g, "")
+                .trim();
+
+            const firstLetter =
+                senderName.charAt(0).toUpperCase() || "U";
+
+            const avatarColors = [
+                "purple-bg",
+                "blue-bg",
+                "green-bg"
+            ];
+
+            const colorClass =
+                avatarColors[
+                    Math.abs(firstLetter.charCodeAt(0)) %
+                    avatarColors.length
+                ];
+
+            const date = email.received_at
+                ? new Date(email.received_at)
+                : null;
+
+            const formattedDate =
+                date && !isNaN(date)
+                    ? date.toLocaleDateString()
+                    : "Today";
+
+            const body = email.body || "";
+
+            const preview = body
+                .replace(/\s+/g, " ")
+                .trim()
+                .substring(0, 180);
+
+            const searchStr = `
+                ${senderName}
+                ${email.subject || ""}
+                ${body}
+            `.toLowerCase();
+
+            const emailCard = document.createElement("div");
+
+            emailCard.className = "email-card unread";
+
+            emailCard.setAttribute(
+                "data-search",
+                searchStr
+            );
+
+            emailCard.innerHTML = `
+                <div class="sender-avatar ${colorClass}">
+                    ${firstLetter}
+                </div>
+
+                <div class="email-body">
+
+                    <div class="email-line">
+
+                        <strong>
+                            ${senderName}
+                        </strong>
+
+                        <span>
+                            ${formattedDate}
+                        </span>
+
+                    </div>
+
+                    <h3>
+                        ${email.subject || "No Subject"}
+                    </h3>
+
+                    <p>
+                        ${preview}
+                        ${body.length > 180 ? "..." : ""}
+                    </p>
+
+                    <div class="email-meta">
+
+                        <span>
+                            ✉ Gmail
+                        </span>
+
+                        <span>
+                            ◷ ${formattedDate}
+                        </span>
+
+                        <span>
+                            ✓ Email received
+                        </span>
+
+                    </div>
+
+                </div>
+            `;
+
+            emailList.appendChild(emailCard);
+        });
+
+        const inboxSubtitle =
+            document.getElementById("inboxSubtitle");
+
+        if (inboxSubtitle) {
+            inboxSubtitle.textContent =
+                `${data.count} messages · Gmail synced`;
+        }
+
+        const countEl =
+            document.getElementById("email-count");
+
+        if (countEl) {
+            countEl.textContent = data.count;
+        }
+
+    } catch (error) {
+        console.error(
+            "Error loading inbox emails:",
+            error
+        );
+    }
+}
+
+(async () => {
+    const data = await loadCurrentUser();
+    const isLoggedIn = data && (data.logged_in || data.authenticated);
+
+    if (isLoggedIn) {
+        try {
+            await fetch(`${API_BASE_URL}/gmail/emails`, {
+                credentials: "include"
+            });
+        } catch (error) {
+            console.error("Error syncing Gmail:", error);
+        }
+    }
+
+    await loadInboxEmails();
+})();
 
 const pages = document.querySelectorAll(".page");
 const navItems = document.querySelectorAll(".nav-item");
@@ -277,123 +458,159 @@ async function pendingTasksCount() {
 }
 
 pendingTasksCount();
-
 async function getAllTasks() {
     try {
-        const response = await fetch(`${API_BASE_URL}/tasks/all`, { headers: getHeaders() });
+        const response = await fetch(
+            `${API_BASE_URL}/tasks/all`,
+            {
+                headers: getHeaders()
+            }
+        );
+
+        if (!response.ok) {
+            throw new Error(`Failed to fetch tasks: ${response.status}`);
+        }
+
         const tasks = await response.json();
 
-        const todoList = document.getElementById("todo-list");
-        const todoCount = document.getElementById("todo-count");
-        const completedList = document.getElementById("completed-list");
-        const completedCount = document.getElementById("completed-count");
-        const emailList = document.getElementById("emailList");
+        const todoList =
+            document.getElementById("todo-list");
 
-        if (todoList) todoList.innerHTML = "";
-        if (completedList) completedList.innerHTML = "";
-        if (emailList) emailList.innerHTML = "";
+        const todoCount =
+            document.getElementById("todo-count");
+
+        const completedList =
+            document.getElementById("completed-list");
+
+        const completedCount =
+            document.getElementById("completed-count");
+
+        if (todoList) {
+            todoList.innerHTML = "";
+        }
+
+        if (completedList) {
+            completedList.innerHTML = "";
+        }
 
         let pendingNum = 0;
         let completedNum = 0;
 
-        if (emailList && tasks.length === 0) {
-            emailList.innerHTML = `
-                <div class="empty-feature" style="padding: 50px 20px;">
-                    <div class="big-icon">✉</div>
-                    <h2>Your Inbox is Clear</h2>
-                    <p>No analyzed emails yet. Use the AI Assistant or Add New Task to populate your inbox!</p>
-                </div>
-            `;
-        }
-
         tasks.forEach(task => {
-            const priority = (task.priority || "medium").toLowerCase();
-            let tagClass = priority === "high" ? "red" : priority === "medium" ? "amber" : "green";
 
-            const isCompleted = task.status === "Completed";
+            const priority =
+                (task.priority || "medium").toLowerCase();
+
+            let tagClass =
+                priority === "high"
+                    ? "red"
+                    : priority === "medium"
+                    ? "amber"
+                    : "green";
+
+            const isCompleted =
+                task.status === "Completed";
+
             if (isCompleted) {
                 completedNum++;
             } else {
                 pendingNum++;
             }
 
-            // Render Task item
-            const taskElement = document.createElement("div");
-            taskElement.className = `task ${isCompleted ? "done" : ""}`;
+            // =========================
+            // Render Task
+            // =========================
+
+            const taskElement =
+                document.createElement("div");
+
+            taskElement.className =
+                `task ${isCompleted ? "done" : ""}`;
 
             taskElement.innerHTML = `
-                <input type="checkbox" ${isCompleted ? "checked" : ""}>
+                <input
+                    type="checkbox"
+                    ${isCompleted ? "checked" : ""}
+                >
+
                 <div>
-                    <strong>${task.task}</strong>
-                    <p>Deadline · ${task.deadline}</p>
+                    <strong>
+                        ${task.task || "No task"}
+                    </strong>
+
+                    <p>
+                        Deadline · ${task.deadline || "No deadline"}
+                    </p>
                 </div>
+
                 <span class="tag ${tagClass}">
-                    ${task.priority}
+                    ${task.priority || "Medium"}
                 </span>
             `;
 
-            if (isCompleted && completedList) {
-                completedList.appendChild(taskElement);
-            } else if (todoList) {
-                todoList.appendChild(taskElement);
+            if (isCompleted) {
+
+                if (completedList) {
+                    completedList.appendChild(taskElement);
+                }
+
+            } else {
+
+                if (todoList) {
+                    todoList.appendChild(taskElement);
+                }
             }
 
-            const checkbox = taskElement.querySelector("input");
+            // =========================
+            // Checkbox
+            // =========================
 
-            checkbox.addEventListener("change", async () => {
-                const status = checkbox.checked ? "Completed" : "pending";
+            const checkbox =
+                taskElement.querySelector("input");
 
-                await fetch(
-                    `${API_BASE_URL}/tasks/status?task_id=${encodeURIComponent(task.id || '')}&task_name=${encodeURIComponent(task.task)}&status=${status}`,
-                    {
-                        method: "PUT",
-                        headers: getHeaders()
+            if (checkbox) {
+
+                checkbox.addEventListener(
+                    "change",
+                    async () => {
+
+                        const status =
+                            checkbox.checked
+                                ? "Completed"
+                                : "pending";
+
+                        await fetch(
+                            `${API_BASE_URL}/tasks/status?task_id=${encodeURIComponent(task.id || "")}&task_name=${encodeURIComponent(task.task || "")}&status=${status}`,
+                            {
+                                method: "PUT",
+                                headers: getHeaders()
+                            }
+                        );
+
+                        getAllTasks();
+                        pendingTasksCount();
+                        getDeadlines();
                     }
                 );
-
-                getAllTasks();
-                pendingTasksCount();
-                getDeadlines();
-            });
-
-            // Render Real Email Card dynamically on Inbox page
-            if (emailList) {
-                const titleText = task.summary || task.task || "Email Item";
-                const firstLetter = titleText.charAt(0).toUpperCase();
-                const avatarColors = ["purple-bg", "blue-bg", "green-bg"];
-                const colorClass = avatarColors[Math.abs(firstLetter.charCodeAt(0)) % avatarColors.length];
-                const searchStr = `${task.task} ${task.summary || ''} ${task.deadline} ${task.priority} ${task.status}`.toLowerCase();
-
-                const emailCard = document.createElement("div");
-                emailCard.className = `email-card ${isCompleted ? "" : "unread"}`;
-                emailCard.setAttribute("data-search", searchStr);
-
-                emailCard.innerHTML = `
-                    <div class="sender-avatar ${colorClass}">${firstLetter}</div>
-                    <div class="email-body">
-                        <div class="email-line">
-                            <strong>${task.summary || "Email Summary"}</strong>
-                            <span>${task.deadline || "Today"}</span>
-                        </div>
-                        <h3>${task.task}</h3>
-                        <p>${task.summary ? "AI Summary: " + task.summary : "Action item extracted by InboxAI."}</p>
-                        <div class="email-meta">
-                            <span class="tag ${tagClass}">${task.priority} Priority</span>
-                            <span>◷ ${task.deadline}</span>
-                            <span>${isCompleted ? "✓ Completed" : "✓ Task detected"}</span>
-                        </div>
-                    </div>
-                `;
-                emailList.appendChild(emailCard);
             }
         });
 
-        if (todoCount) todoCount.textContent = pendingNum;
-        if (completedCount) completedCount.textContent = completedNum;
+        if (todoCount) {
+            todoCount.textContent = pendingNum;
+        }
+
+        if (completedCount) {
+            completedCount.textContent = completedNum;
+        }
+
     } catch (err) {
-        console.warn("All tasks fetch error:", err);
+        console.warn(
+            "All tasks fetch error:",
+            err
+        );
     }
 }
+
 
 const priorityRank = {
     "high": 1,
@@ -529,6 +746,6 @@ const connectGmailBtn = document.getElementById("connectGmailBtn");
 
 if (connectGmailBtn) {
     connectGmailBtn.addEventListener("click", () => {
-        window.location.href = "http://localhost:8007/auth/google/login";
+        window.location.href = `${API_BASE_URL}/auth/google/login`;
     });
 }

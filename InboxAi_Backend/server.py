@@ -1,10 +1,11 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import os
 import redis
 from dotenv import load_dotenv
 import json
 from pathlib import Path
+from urllib.parse import urlparse
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
@@ -20,8 +21,9 @@ from database import engine
 #################### Google API imports
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request as GoogleAuthRequest
 import base64
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 
 env_path = Path(__file__).parent / "agents" / ".env"
@@ -53,13 +55,90 @@ app.add_middleware(
 
 
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
+def cors_origins() -> list[str]:
+    origins = {
         "http://127.0.0.1:5500",
         "http://localhost:5500",
-        "https://inboxai.fastapicloud.dev"
-    ],
+        "https://inboxai.fastapicloud.dev",
+    }
+    frontend_url = os.getenv("FRONTEND_URL")
+    if frontend_url:
+        parsed = urlparse(frontend_url)
+        if parsed.scheme and parsed.netloc:
+            origins.add(f"{parsed.scheme}://{parsed.netloc}")
+    return list(origins)
+
+
+def frontend_redirect_url() -> str:
+    return os.getenv(
+        "FRONTEND_URL",
+        "http://localhost:5500/InboxAI_frontend/index.html",
+    )
+
+
+def require_user_id(request: Request) -> int:
+    user_id = request.session.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not logged in")
+    return user_id
+
+
+def oauth_token_expiry(token: dict) -> str | None:
+    expires_at = token.get("expires_at")
+    if expires_at:
+        return datetime.fromtimestamp(int(expires_at), tz=timezone.utc).isoformat()
+
+    expires_in = token.get("expires_in")
+    if expires_in is not None:
+        return (
+            datetime.now(timezone.utc) + timedelta(seconds=int(expires_in))
+        ).isoformat()
+
+    return None
+
+
+def credentials_expiry(token_expiry: str | None) -> datetime | None:
+    if not token_expiry:
+        return None
+
+    expiry = datetime.fromisoformat(str(token_expiry).replace("Z", "+00:00"))
+    if expiry.tzinfo is not None:
+        expiry = expiry.astimezone(timezone.utc).replace(tzinfo=None)
+    return expiry
+
+
+def persist_gmail_tokens(gmail_account_id: int, credentials: Credentials) -> None:
+    expiry = None
+    if credentials.expiry:
+        expiry_dt = credentials.expiry
+        if expiry_dt.tzinfo is None:
+            expiry_dt = expiry_dt.replace(tzinfo=timezone.utc)
+        expiry = expiry_dt.isoformat()
+
+    refresh_token = credentials.refresh_token or None
+
+    with engine.begin() as connection:
+        connection.execute(
+            text("""
+                UPDATE gmail_accounts
+                SET
+                    access_token = :access_token,
+                    token_expiry = :token_expiry,
+                    refresh_token = COALESCE(:refresh_token, refresh_token)
+                WHERE id = :id
+            """),
+            {
+                "access_token": credentials.token,
+                "token_expiry": expiry,
+                "refresh_token": refresh_token,
+                "id": gmail_account_id,
+            },
+        )
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -263,18 +342,23 @@ async def google_callback(request: Request):
     if not userinfo:
         userinfo = await oauth.google.userinfo(token=token)
 
-    google_id = userinfo.get("sub")
+    google_sub = userinfo.get("sub")
+    google_id = google_sub
     email = userinfo.get("email")
     name = userinfo.get("name")
 
+    if not google_id:
+        raise HTTPException(status_code=400, detail="Google did not return a user id")
+
     access_token = token.get("access_token")
-    refresh_token = token.get("refresh_token")
+    refresh_token = token.get("refresh_token") or None
+    token_expiry = oauth_token_expiry(token)
 
     user_id = None
 
     with engine.begin() as connection:
 
-        # 1. Check if user already exists
+        # 1. Check if user already exists (SQL column is google_id, not google_sub)
         result = connection.execute(
             text("""
                 SELECT id
@@ -292,6 +376,21 @@ async def google_callback(request: Request):
         if existing_user:
 
             user_id = existing_user[0]
+
+            connection.execute(
+                text("""
+                    UPDATE users
+                    SET
+                        email = :email,
+                        name = :name
+                    WHERE id = :user_id
+                """),
+                {
+                    "email": email,
+                    "name": name,
+                    "user_id": user_id,
+                }
+            )
 
         else:
 
@@ -318,17 +417,15 @@ async def google_callback(request: Request):
 
             user_id = result.fetchone()[0]
 
-        # 3. Check if Gmail account already exists
+        # 3. One Gmail account per user_id (unique constraint)
         result = connection.execute(
             text("""
                 SELECT id
                 FROM gmail_accounts
                 WHERE user_id = :user_id
-                AND gmail_email = :gmail_email
             """),
             {
-                "user_id": user_id,
-                "gmail_email": email
+                "user_id": user_id
             }
         )
 
@@ -341,22 +438,32 @@ async def google_callback(request: Request):
                 text("""
                     UPDATE gmail_accounts
                     SET
+                        gmail_email = :gmail_email,
                         access_token = :access_token,
+                        token_expiry = :token_expiry,
                         refresh_token = COALESCE(
                             :refresh_token,
                             refresh_token
                         )
-                    WHERE id = :id
+                    WHERE user_id = :user_id
                 """),
                 {
+                    "gmail_email": email,
                     "access_token": access_token,
+                    "token_expiry": token_expiry,
                     "refresh_token": refresh_token,
-                    "id": existing_gmail[0]
+                    "user_id": user_id,
                 }
             )
 
-        # 5. Create Gmail account
+        # 5. Create the one Gmail account for this user
         else:
+
+            if not refresh_token:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Google did not return a refresh token. Please grant consent and try again.",
+                )
 
             connection.execute(
                 text("""
@@ -364,20 +471,23 @@ async def google_callback(request: Request):
                         user_id,
                         gmail_email,
                         access_token,
-                        refresh_token
+                        refresh_token,
+                        token_expiry
                     )
                     VALUES (
                         :user_id,
                         :gmail_email,
                         :access_token,
-                        :refresh_token
+                        :refresh_token,
+                        :token_expiry
                     )
                 """),
                 {
                     "user_id": user_id,
                     "gmail_email": email,
                     "access_token": access_token,
-                    "refresh_token": refresh_token
+                    "refresh_token": refresh_token,
+                    "token_expiry": token_expiry,
                 }
             )
 
@@ -387,25 +497,39 @@ async def google_callback(request: Request):
     request.session["name"] = name
 
     # 7. Redirect back to frontend
-    return RedirectResponse(
-    url="http://localhost:5500/InboxAI_frontend/index.html"
-        )
+    return RedirectResponse(url=frontend_redirect_url())
 
 @app.get("/gmail/emails")
-async def get_gmail_emails():
+async def get_gmail_emails(request: Request):
 
-    # 1. Get the latest connected Gmail account
+    user_id = require_user_id(request)
+
     with engine.connect() as connection:
         result = connection.execute(
             text("""
-                SELECT id, access_token, refresh_token
+                SELECT
+                    id,
+                    gmail_email,
+                    access_token,
+                    refresh_token,
+                    token_expiry
                 FROM gmail_accounts
-                ORDER BY id DESC
-                LIMIT 1
-            """)
+                WHERE user_id = :user_id
+            """),
+            {
+                "user_id": user_id
+            }
         )
 
-        gmail_account = result.fetchone()
+        rows = result.fetchall()
+
+    if len(rows) > 1:
+        raise HTTPException(
+            status_code=500,
+            detail="Multiple Gmail accounts found for this user. Each user must have exactly one Gmail account.",
+        )
+
+    gmail_account = rows[0] if rows else None
 
     if not gmail_account:
         return {
@@ -413,10 +537,10 @@ async def get_gmail_emails():
         }
 
     gmail_account_id = gmail_account[0]
-    access_token = gmail_account[1]
-    refresh_token = gmail_account[2]
+    access_token = gmail_account[2]
+    refresh_token = gmail_account[3]
+    token_expiry = gmail_account[4]
 
-    # 2. Create Google credentials
     credentials = Credentials(
         token=access_token,
         refresh_token=refresh_token,
@@ -425,10 +549,14 @@ async def get_gmail_emails():
         client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
         scopes=[
             "https://www.googleapis.com/auth/gmail.readonly"
-        ]
+        ],
+        expiry=credentials_expiry(token_expiry),
     )
 
-    # 3. Create Gmail API client
+    if credentials.expired and credentials.refresh_token:
+        credentials.refresh(GoogleAuthRequest())
+        persist_gmail_tokens(gmail_account_id, credentials)
+
     gmail = build(
         "gmail",
         "v1",
@@ -488,8 +616,6 @@ async def get_gmail_emails():
         received_at = None
 
         if internal_date:
-            from datetime import datetime, timezone
-
             received_at = datetime.fromtimestamp(
                 int(internal_date) / 1000,
                 tz=timezone.utc
@@ -601,6 +727,8 @@ async def get_gmail_emails():
     # Response
     # --------------------------------
 
+    persist_gmail_tokens(gmail_account_id, credentials)
+
     return {
         "message": "Emails fetched successfully",
         "fetched": len(messages),
@@ -610,23 +738,31 @@ async def get_gmail_emails():
 
 
 @app.get("/emails")
-async def get_saved_emails():
+async def get_saved_emails(request: Request):
+
+    user_id = require_user_id(request)
 
     with engine.connect() as connection:
 
         result = connection.execute(
             text("""
                 SELECT
-                    id,
-                    gmail_account_id,
-                    gmail_message_id,
-                    sender,
-                    subject,
-                    body,
-                    received_at
+                    emails.id,
+                    emails.gmail_account_id,
+                    emails.gmail_message_id,
+                    emails.sender,
+                    emails.subject,
+                    emails.body,
+                    emails.received_at
                 FROM emails
-                ORDER BY received_at DESC
-            """)
+                JOIN gmail_accounts
+                    ON gmail_accounts.id = emails.gmail_account_id
+                WHERE gmail_accounts.user_id = :user_id
+                ORDER BY emails.received_at DESC
+            """),
+            {
+                "user_id": user_id
+            }
         )
 
         rows = result.fetchall()
@@ -774,14 +910,46 @@ async def get_current_user(request: Request):
 
     if not user_id:
         return {
+            "logged_in": False,
+            "authenticated": False
+        }
+
+    with engine.connect() as connection:
+        result = connection.execute(
+            text("""
+                SELECT id, email, name
+                FROM users
+                WHERE id = :user_id
+            """),
+            {
+                "user_id": user_id
+            }
+        )
+        user = result.fetchone()
+
+    if not user:
+        request.session.clear()
+        return {
+            "logged_in": False,
             "authenticated": False
         }
 
     return {
+        "logged_in": True,
         "authenticated": True,
-        "user_id": user_id,
-        "email": request.session.get("email"),
-        "name": request.session.get("name")
+        "user_id": user[0],
+        "email": user[1],
+        "name": user[2]
+    }
+
+
+@app.get("/auth/logout")
+@app.post("/auth/logout")
+async def logout(request: Request):
+    request.session.clear()
+    return {
+        "logged_in": False,
+        "authenticated": False
     }
 
 
