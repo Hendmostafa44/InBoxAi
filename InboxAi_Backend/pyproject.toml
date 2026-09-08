@@ -11,12 +11,12 @@ dependencies = [
     "google-adk>=2.7.0",
     "google-genai>=0.1.0",
     "litellm>=1.30.0",
-    "redis>=8.1.0",
     "uvicorn>=0.28.0",
     "itsdangerous>=2.2.0",
     "sqlalchemy>=2.0.52",
     "psycopg[binary]>=3.3.5",
     "google-api-python-client>=2.200.0",
+    "google-auth-oauthlib>=1.4.1",
 ]
 
 [tool.fastapi]

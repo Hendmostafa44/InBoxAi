@@ -4,8 +4,7 @@ from google.adk.agents import SequentialAgent
 
 from tools.tools import (
     get_current_datetime,
-    create_task,
-    save_task
+    create_task
 )
 
 
@@ -110,8 +109,6 @@ If there is no task:
 
 You MUST call create_task when there is a real task.
 
-Then ALWAYS call save_task to save the task, deadline, and priority in Redis.
-
 Return ONLY a JSON object with exactly:
 
 {
@@ -133,8 +130,7 @@ Do not add ```json.
 
     tools=[
         get_current_datetime,
-        create_task,
-        save_task
+        create_task
     ],
 
     output_key="priority_analysis"

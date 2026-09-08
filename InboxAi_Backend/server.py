@@ -1,186 +1,112 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-import os
-import redis
-from dotenv import load_dotenv
-import json
-from pathlib import Path
-from urllib.parse import urlparse
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.sessions import SessionMiddleware
+
+from sqlalchemy import text
+
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import Flow
+from googleapiclient.discovery import build
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
-from fastapi.middleware.cors import CORSMiddleware
+
 from agents.agent import root_agent
-################### login imports
-from authlib.integrations.starlette_client import OAuth
-from starlette.requests import Request
-from starlette.responses import RedirectResponse
-################### database imports
-from sqlalchemy import text
-from database import engine
-#################### Google API imports
-from googleapiclient.discovery import build
-from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request as GoogleAuthRequest
+
+from dotenv import load_dotenv
+
+import os
+import json
+import uuid
 import base64
-from datetime import datetime, timezone, timedelta
+import re
+from email.utils import parsedate_to_datetime
+from datetime import datetime
 
 
-env_path = Path(__file__).parent / "agents" / ".env"
-load_dotenv(env_path)
-oauth = OAuth()
+# =========================================================
+# ENV
+# =========================================================
 
-oauth.register(
-    name="google",
-    client_id=os.getenv("GOOGLE_CLIENT_ID"),
-    client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
-    server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
-    client_kwargs={
-        "scope": "openid email profile https://www.googleapis.com/auth/gmail.readonly",
-        "access_type": "offline",
-    }
-)
+load_dotenv()
 
+
+# =========================================================
+# APP
+# =========================================================
 
 app = FastAPI()
 
-from starlette.middleware.sessions import SessionMiddleware
+
+# =========================================================
+# SESSION
+# =========================================================
 
 app.add_middleware(
     SessionMiddleware,
-    secret_key=os.getenv("SESSION_SECRET_KEY", "dev-secret-change-me"),
+    secret_key=os.getenv(
+        "SESSION_SECRET_KEY",
+        "dev-secret-change-me"
+    ),
     same_site="lax",
     https_only=False
 )
 
 
-
-def cors_origins() -> list[str]:
-    origins = {
-        "http://127.0.0.1:5500",
-        "http://localhost:5500",
-        "https://inboxai.fastapicloud.dev",
-    }
-    frontend_url = os.getenv("FRONTEND_URL")
-    if frontend_url:
-        parsed = urlparse(frontend_url)
-        if parsed.scheme and parsed.netloc:
-            origins.add(f"{parsed.scheme}://{parsed.netloc}")
-    return list(origins)
-
-
-def frontend_redirect_url() -> str:
-    return os.getenv(
-        "FRONTEND_URL",
-        "http://localhost:5500/InboxAI_frontend/index.html",
-    )
-
-
-def require_user_id(request: Request) -> int:
-    user_id = request.session.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Not logged in")
-    return user_id
-
-
-def oauth_token_expiry(token: dict) -> str | None:
-    expires_at = token.get("expires_at")
-    if expires_at:
-        return datetime.fromtimestamp(int(expires_at), tz=timezone.utc).isoformat()
-
-    expires_in = token.get("expires_in")
-    if expires_in is not None:
-        return (
-            datetime.now(timezone.utc) + timedelta(seconds=int(expires_in))
-        ).isoformat()
-
-    return None
-
-
-def credentials_expiry(token_expiry: str | None) -> datetime | None:
-    if not token_expiry:
-        return None
-
-    expiry = datetime.fromisoformat(str(token_expiry).replace("Z", "+00:00"))
-    if expiry.tzinfo is not None:
-        expiry = expiry.astimezone(timezone.utc).replace(tzinfo=None)
-    return expiry
-
-
-def persist_gmail_tokens(gmail_account_id: int, credentials: Credentials) -> None:
-    expiry = None
-    if credentials.expiry:
-        expiry_dt = credentials.expiry
-        if expiry_dt.tzinfo is None:
-            expiry_dt = expiry_dt.replace(tzinfo=timezone.utc)
-        expiry = expiry_dt.isoformat()
-
-    refresh_token = credentials.refresh_token or None
-
-    with engine.begin() as connection:
-        connection.execute(
-            text("""
-                UPDATE gmail_accounts
-                SET
-                    access_token = :access_token,
-                    token_expiry = :token_expiry,
-                    refresh_token = COALESCE(:refresh_token, refresh_token)
-                WHERE id = :id
-            """),
-            {
-                "access_token": credentials.token,
-                "token_expiry": expiry,
-                "refresh_token": refresh_token,
-                "id": gmail_account_id,
-            },
-        )
-
+# =========================================================
+# CORS
+# =========================================================
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins(),
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-r = redis.Redis(
-    host=os.getenv("REDIS_HOST"),
-    port=int(os.getenv("REDIS_PORT", 10942)),
-    username=os.getenv("REDIS_USERNAME"),
-    password=os.getenv("REDIS_PASSWORD"),
-    decode_responses=True
+
+# =========================================================
+# DATABASE
+# =========================================================
+
+# Keep your existing engine import here.
+# Example:
+#
+# from database import engine
+
+from database import engine
+
+
+# =========================================================
+# GOOGLE CONFIG
+# =========================================================
+
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+
+GOOGLE_REDIRECT_URI = os.getenv(
+    "GOOGLE_REDIRECT_URI",
+    "http://localhost:8007/auth/google/callback"
 )
 
-class MailSummary(BaseModel):
-    summary: str
-    task: str
-    deadline: str
-    priority: str
+GOOGLE_SCOPES = [
+    "openid",
+    "email",
+    "profile",
+    "https://www.googleapis.com/auth/gmail.readonly",
+]
 
-class AIEmailAnalysis(BaseModel):
-    summary: str
-    priority: str
-    task: str
-    deadline: str
 
-@app.post("/save_task")
-async def save_task(mail_summary: MailSummary):
+# =========================================================
+# ADK
+# =========================================================
 
-    email = json.dumps({
-        "id": str(uuid.uuid4()),
-        "summary": mail_summary.summary,
-        "task": mail_summary.task,
-        "deadline": mail_summary.deadline,
-        "priority": mail_summary.priority,
-        "status": "pending"
-    })
-
-    r.rpush("emails", email)
-
-    return {"message": "Email saved successfully"}
-
-import uuid
 session_service = InMemorySessionService()
 
 runner = Runner(
@@ -188,178 +114,273 @@ runner = Runner(
     app_name="InboxAI",
     session_service=session_service,
 )
-class EmailRequest(BaseModel):
-    message: str
 
-@app.post("/analyze")
-async def analyze_email(request: EmailRequest):
 
-    print("1. Request received:", request.message)
+# =========================================================
+# HELPERS
+# =========================================================
 
-    user_id = "frontend_user"
-    session_id =str(uuid.uuid4())  ### importana!!! every email request should have a new session id to avoid any context from previous requests
+def require_user_id(request: Request) -> int:
+    """
+    Get the logged-in user ID from the session.
+    """
 
-    print("2. Creating session...")
+    user_id = request.session.get("user_id")
 
-    await session_service.create_session(
-        app_name="InboxAI",
-        user_id=user_id,
-        session_id=session_id,
-    )
+    if not user_id:
+        raise HTTPException(
+            status_code=401,
+            detail="Not logged in"
+        )
 
-    print("3. Session created")
+    return user_id
 
-    content = types.Content(
-        role="user",
-        parts=[
-            types.Part(text=request.message)
-        ],
-    )
 
-    print("4. Starting agent...")
+def get_google_flow() -> Flow:
+    """
+    Create Google OAuth flow.
+    """
 
-    final_response = ""
-
-    async for event in runner.run_async(
-        user_id=user_id,
-        session_id=session_id,
-        new_message=content,
-    ):
-        print("5. Event received:", event)
-
-        if event.is_final_response():
-            if event.content and event.content.parts:
-                final_response = event.content.parts[0].text
-
-    print("6. Agent finished")
-
-    return {
-        "response": final_response
+    client_config = {
+        "web": {
+            "client_id": GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [
+                GOOGLE_REDIRECT_URI
+            ],
+        }
     }
 
-@app.get("/tasks/count")
-async def get_tasks_count():
-    count = r.llen("emails")
-    return {"count": count}
-
-
-@app.get("/tasks/pending/count")
-async def get_pending_tasks_count():
-    tasks = r.lrange("emails", 0, -1)
-
-    pending_count = sum(
-        1
-        for task in tasks
-        if json.loads(task).get("status") == "pending"
+    flow = Flow.from_client_config(
+        client_config,
+        scopes=GOOGLE_SCOPES,
+        redirect_uri=GOOGLE_REDIRECT_URI,
     )
 
-    return {"count": pending_count}
+    return flow
 
 
+def get_header(headers, name):
+    """
+    Get a Gmail header value.
+    """
 
-@app.get("/tasks/priorities")
-async def get_priorities():
-    tasks = r.lrange("emails", 0, -1)
+    for header in headers:
+        if header["name"].lower() == name.lower():
+            return header["value"]
 
-    result = []
-
-    for task in tasks:
-        task = json.loads(task)
-
-        if task.get("priority") in ["High", "Medium", "Low"]:
-            result.append(task)
-
-    return result
-
-@app.get("/tasks/all")
-async def get_all_tasks():
-    raw_tasks = r.lrange("emails", 0, -1)
-    parsed_tasks = []
-
-    for index, task_str in enumerate(raw_tasks):
-        task_data = json.loads(task_str)
-        if "id" not in task_data:
-            task_data["id"] = str(uuid.uuid4())
-            r.lset("emails", index, json.dumps(task_data))
-        parsed_tasks.append(task_data)
-
-    return parsed_tasks
+    return ""
 
 
+def decode_gmail_body(data):
+    """
+    Decode Gmail base64url body.
+    """
 
-@app.put("/tasks/status")
-async def update_task_status(task_name: str | None = None, status: str = "pending", task_id: str | None = None):
-    tasks = r.lrange("emails", 0, -1)
+    if not data:
+        return ""
 
-    for index, task in enumerate(tasks):
-        task_data = json.loads(task)
+    try:
+        decoded = base64.urlsafe_b64decode(
+            data.encode("UTF-8")
+        )
 
-        is_match = False
-        if task_id and task_data.get("id") == task_id:
-            is_match = True
-        elif task_name and task_data.get("task") == task_name:
-            is_match = True
+        return decoded.decode(
+            "UTF-8",
+            errors="ignore"
+        )
 
-        if is_match:
-            task_data["status"] = status
-            r.lset("emails", index, json.dumps(task_data))
-            return {
-                "message": "Task status updated",
-                "status": status
-            }
-
-    return {"message": "Task not found"}
-
-@app.get("/tasks/urgent")
-async def get_urgent_tasks():
-    count=0
-    tasks = r.lrange("emails", 0, -1)
-    for task in tasks:
-        task = json.loads(task)
-        if task.get("priority") == "High" and task.get("status") == "pending":
-            count += 1
-    return count
-    
-@app.get("/auth/google/login")
-async def google_login(request: Request):
-    redirect_uri = request.url_for("google_callback")
-
-    return await oauth.google.authorize_redirect(
-        request,
-        redirect_uri,
-        access_type="offline",
-        prompt="consent"
-    )
+    except Exception:
+        return ""
 
 
-@app.get("/auth/google/callback")
-async def google_callback(request: Request):
+def extract_gmail_body(payload):
+    """
+    Extract text/plain body from Gmail message.
+    """
 
-    token = await oauth.google.authorize_access_token(request)
+    # Direct body
+    body_data = payload.get("body", {}).get("data")
 
-    userinfo = token.get("userinfo")
+    if body_data:
+        return decode_gmail_body(body_data)
 
-    if not userinfo:
-        userinfo = await oauth.google.userinfo(token=token)
+    # Multipart body
+    parts = payload.get("parts", [])
 
-    google_sub = userinfo.get("sub")
-    google_id = google_sub
-    email = userinfo.get("email")
-    name = userinfo.get("name")
+    for part in parts:
 
-    if not google_id:
-        raise HTTPException(status_code=400, detail="Google did not return a user id")
+        mime_type = part.get("mimeType", "")
 
-    access_token = token.get("access_token")
-    refresh_token = token.get("refresh_token") or None
-    token_expiry = oauth_token_expiry(token)
+        if mime_type == "text/plain":
 
-    user_id = None
+            data = part.get(
+                "body",
+                {}
+            ).get("data")
+
+            if data:
+                return decode_gmail_body(data)
+
+        # Nested multipart
+        if part.get("parts"):
+
+            nested_body = extract_gmail_body(part)
+
+            if nested_body:
+                return nested_body
+
+    return ""
+
+
+def parse_received_date(date_string):
+    """
+    Convert Gmail Date header into datetime.
+    """
+
+    if not date_string:
+        return None
+
+
+def extract_json_object(raw_response):
+    if not raw_response:
+        return None
+
+    text = str(raw_response).strip()
+    text = text.replace("_output_", "", 1).strip()
+    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE)
+
+    match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+    if not match:
+        return None
+
+    try:
+        return json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return None
+
+    try:
+        return parsedate_to_datetime(
+            date_string
+        )
+
+    except Exception:
+        return None
+
+
+def persist_gmail_tokens(
+    gmail_account_id,
+    credentials
+):
+    """
+    Save updated Google OAuth credentials.
+    """
+
+    token = credentials.token
+
+    refresh_token = credentials.refresh_token
+
+    expiry = credentials.expiry
 
     with engine.begin() as connection:
 
-        # 1. Check if user already exists (SQL column is google_id, not google_sub)
-        result = connection.execute(
+        connection.execute(
+            text("""
+                UPDATE gmail_accounts
+                SET
+                    access_token = :access_token,
+                    refresh_token = COALESCE(
+                        :refresh_token,
+                        refresh_token
+                    ),
+                    token_expiry = :token_expiry
+                WHERE id = :gmail_account_id
+            """),
+            {
+                "access_token": token,
+                "refresh_token": refresh_token,
+                "token_expiry": expiry,
+                "gmail_account_id": gmail_account_id,
+            }
+        )
+
+
+# =========================================================
+# GOOGLE AUTH
+# =========================================================
+
+@app.get("/auth/google/login")
+async def google_login(request: Request):
+
+    flow = get_google_flow()
+
+    authorization_url, state = flow.authorization_url(
+        access_type="offline",
+        include_granted_scopes="true",
+        prompt="consent",
+    )
+
+    request.session["oauth_state"] = state
+
+    return {
+        "authorization_url": authorization_url
+    }
+
+
+# =========================================================
+# GOOGLE CALLBACK
+# =========================================================
+
+@app.get("/auth/google/callback")
+async def google_callback(
+    request: Request
+):
+
+    code = request.query_params.get("code")
+
+    if not code:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing authorization code"
+        )
+
+    flow = get_google_flow()
+
+    flow.fetch_token(code=code)
+
+    credentials = flow.credentials
+
+    # -----------------------------------------
+    # Get Google user information
+    # -----------------------------------------
+
+    oauth_service = build(
+        "oauth2",
+        "v2",
+        credentials=credentials
+    )
+
+    google_user = oauth_service.userinfo().get().execute()
+
+    google_id = google_user.get("id")
+    email = google_user.get("email")
+    name = google_user.get("name")
+
+    if not google_id or not email:
+        raise HTTPException(
+            status_code=400,
+            detail="Could not get Google user information"
+        )
+
+    # -----------------------------------------
+    # Create / update user
+    # -----------------------------------------
+
+    with engine.begin() as connection:
+
+        existing_user = connection.execute(
             text("""
                 SELECT id
                 FROM users
@@ -368,11 +389,8 @@ async def google_callback(request: Request):
             {
                 "google_id": google_id
             }
-        )
+        ).fetchone()
 
-        existing_user = result.fetchone()
-
-        # 2. Create user if this is the first login
         if existing_user:
 
             user_id = existing_user[0]
@@ -388,7 +406,7 @@ async def google_callback(request: Request):
                 {
                     "email": email,
                     "name": name,
-                    "user_id": user_id,
+                    "user_id": user_id
                 }
             )
 
@@ -417,8 +435,13 @@ async def google_callback(request: Request):
 
             user_id = result.fetchone()[0]
 
-        # 3. One Gmail account per user_id (unique constraint)
-        result = connection.execute(
+    # -----------------------------------------
+    # Gmail account
+    # -----------------------------------------
+
+    with engine.begin() as connection:
+
+        existing_account = connection.execute(
             text("""
                 SELECT id
                 FROM gmail_accounts
@@ -427,449 +450,292 @@ async def google_callback(request: Request):
             {
                 "user_id": user_id
             }
-        )
+        ).fetchone()
 
-        existing_gmail = result.fetchone()
+        if existing_account:
 
-        # 4. Update existing Gmail account
-        if existing_gmail:
+            gmail_account_id = existing_account[0]
 
             connection.execute(
                 text("""
                     UPDATE gmail_accounts
                     SET
-                        gmail_email = :gmail_email,
+                        email = :email,
                         access_token = :access_token,
-                        token_expiry = :token_expiry,
                         refresh_token = COALESCE(
                             :refresh_token,
                             refresh_token
-                        )
-                    WHERE user_id = :user_id
+                        ),
+                        token_expiry = :token_expiry
+                    WHERE id = :gmail_account_id
                 """),
                 {
-                    "gmail_email": email,
-                    "access_token": access_token,
-                    "token_expiry": token_expiry,
-                    "refresh_token": refresh_token,
-                    "user_id": user_id,
+                    "email": email,
+                    "access_token": credentials.token,
+                    "refresh_token": credentials.refresh_token,
+                    "token_expiry": credentials.expiry,
+                    "gmail_account_id": gmail_account_id,
                 }
             )
 
-        # 5. Create the one Gmail account for this user
         else:
 
-            if not refresh_token:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Google did not return a refresh token. Please grant consent and try again.",
-                )
-
-            connection.execute(
+            result = connection.execute(
                 text("""
                     INSERT INTO gmail_accounts (
                         user_id,
-                        gmail_email,
+                        email,
                         access_token,
                         refresh_token,
                         token_expiry
                     )
                     VALUES (
                         :user_id,
-                        :gmail_email,
+                        :email,
                         :access_token,
                         :refresh_token,
                         :token_expiry
                     )
+                    RETURNING id
                 """),
                 {
                     "user_id": user_id,
-                    "gmail_email": email,
-                    "access_token": access_token,
-                    "refresh_token": refresh_token,
-                    "token_expiry": token_expiry,
+                    "email": email,
+                    "access_token": credentials.token,
+                    "refresh_token": credentials.refresh_token,
+                    "token_expiry": credentials.expiry,
                 }
             )
 
-    # 6. Create server-side session
+            gmail_account_id = result.fetchone()[0]
+
+    # -----------------------------------------
+    # Create login session
+    # -----------------------------------------
+
     request.session["user_id"] = user_id
     request.session["email"] = email
     request.session["name"] = name
 
-    # 7. Redirect back to frontend
-    return RedirectResponse(url=frontend_redirect_url())
+    return {
+        "message": "Login successful",
+        "user_id": user_id,
+        "email": email,
+        "name": name,
+    }
 
-@app.get("/gmail/emails")
-async def get_gmail_emails(request: Request):
 
-    user_id = require_user_id(request)
+# =========================================================
+# CURRENT USER
+# =========================================================
+
+@app.get("/auth/me")
+async def auth_me(request: Request):
+
+    user_id = request.session.get("user_id")
+
+    if not user_id:
+
+        return {
+            "logged_in": False,
+            "authenticated": False
+        }
 
     with engine.connect() as connection:
-        result = connection.execute(
+
+        user = connection.execute(
             text("""
                 SELECT
                     id,
-                    gmail_email,
-                    access_token,
-                    refresh_token,
-                    token_expiry
-                FROM gmail_accounts
-                WHERE user_id = :user_id
+                    email,
+                    name
+                FROM users
+                WHERE id = :user_id
             """),
             {
                 "user_id": user_id
             }
-        )
+        ).fetchone()
 
-        rows = result.fetchall()
+    if not user:
 
-    if len(rows) > 1:
-        raise HTTPException(
-            status_code=500,
-            detail="Multiple Gmail accounts found for this user. Each user must have exactly one Gmail account.",
-        )
+        request.session.clear()
 
-    gmail_account = rows[0] if rows else None
-
-    if not gmail_account:
         return {
-            "error": "No Gmail account connected"
+            "logged_in": False,
+            "authenticated": False
         }
 
-    gmail_account_id = gmail_account[0]
-    access_token = gmail_account[2]
-    refresh_token = gmail_account[3]
-    token_expiry = gmail_account[4]
-
-    credentials = Credentials(
-        token=access_token,
-        refresh_token=refresh_token,
-        token_uri="https://oauth2.googleapis.com/token",
-        client_id=os.getenv("GOOGLE_CLIENT_ID"),
-        client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
-        scopes=[
-            "https://www.googleapis.com/auth/gmail.readonly"
-        ],
-        expiry=credentials_expiry(token_expiry),
-    )
-
-    if credentials.expired and credentials.refresh_token:
-        credentials.refresh(GoogleAuthRequest())
-        persist_gmail_tokens(gmail_account_id, credentials)
-
-    gmail = build(
-        "gmail",
-        "v1",
-        credentials=credentials
-    )
-
-    # 4. Get latest 10 emails
-    response = gmail.users().messages().list(
-        userId="me",
-        maxResults=10
-    ).execute()
-
-    messages = response.get("messages", [])
-
-    saved_emails = []
-
-    # 5. Process every email
-    for message in messages:
-
-        message_id = message["id"]
-
-        # Get full email details
-        email_data = gmail.users().messages().get(
-            userId="me",
-            id=message_id,
-            format="full"
-        ).execute()
-
-        payload = email_data.get("payload", {})
-
-        # --------------------------------
-        # Get headers
-        # --------------------------------
-
-        headers = payload.get("headers", [])
-
-        sender = ""
-        subject = ""
-
-        for header in headers:
-
-            header_name = header.get("name", "").lower()
-            header_value = header.get("value", "")
-
-            if header_name == "from":
-                sender = header_value
-
-            elif header_name == "subject":
-                subject = header_value
-
-        # --------------------------------
-        # Get received date
-        # --------------------------------
-
-        internal_date = email_data.get("internalDate")
-
-        received_at = None
-
-        if internal_date:
-            received_at = datetime.fromtimestamp(
-                int(internal_date) / 1000,
-                tz=timezone.utc
-            )
-
-        # --------------------------------
-        # Get email body
-        # --------------------------------
-
-        body = ""
-
-        # Case 1: Simple email body
-        if payload.get("body", {}).get("data"):
-
-            data = payload["body"]["data"]
-
-            body = base64.urlsafe_b64decode(
-                data
-            ).decode(
-                "utf-8",
-                errors="ignore"
-            )
-
-        # Case 2: Multipart email
-        elif payload.get("parts"):
-
-            for part in payload["parts"]:
-
-                mime_type = part.get("mimeType", "")
-
-                if mime_type == "text/plain":
-
-                    data = part.get("body", {}).get("data")
-
-                    if data:
-
-                        body = base64.urlsafe_b64decode(
-                            data
-                        ).decode(
-                            "utf-8",
-                            errors="ignore"
-                        )
-
-                        break
-
-        # --------------------------------
-        # Check if email already exists
-        # --------------------------------
-
-        with engine.connect() as connection:
-
-            existing = connection.execute(
-                text("""
-                    SELECT id
-                    FROM emails
-                    WHERE gmail_account_id = :gmail_account_id
-                    AND gmail_message_id = :gmail_message_id
-                """),
-                {
-                    "gmail_account_id": gmail_account_id,
-                    "gmail_message_id": message_id
-                }
-            ).fetchone()
-
-        # --------------------------------
-        # Save new email
-        # --------------------------------
-
-        if not existing:
-
-            with engine.begin() as connection:
-
-                connection.execute(
-                    text("""
-                        INSERT INTO emails (
-                            gmail_account_id,
-                            gmail_message_id,
-                            sender,
-                            subject,
-                            body,
-                            received_at
-                        )
-                        VALUES (
-                            :gmail_account_id,
-                            :gmail_message_id,
-                            :sender,
-                            :subject,
-                            :body,
-                            :received_at
-                        )
-                    """),
-                    {
-                        "gmail_account_id": gmail_account_id,
-                        "gmail_message_id": message_id,
-                        "sender": sender,
-                        "subject": subject,
-                        "body": body,
-                        "received_at": received_at
-                    }
-                )
-
-            saved_emails.append({
-                "gmail_message_id": message_id,
-                "sender": sender,
-                "subject": subject
-            })
-
-    # --------------------------------
-    # Response
-    # --------------------------------
-
-    persist_gmail_tokens(gmail_account_id, credentials)
-
     return {
-        "message": "Emails fetched successfully",
-        "fetched": len(messages),
-        "saved": len(saved_emails),
-        "emails": saved_emails
+        "logged_in": True,
+        "authenticated": True,
+        "id": user[0],
+        "email": user[1],
+        "name": user[2],
     }
 
 
-@app.get("/emails")
-async def get_saved_emails(request: Request):
+# =========================================================
+# LOGOUT
+# =========================================================
 
-    user_id = require_user_id(request)
+@app.post("/auth/logout")
+async def logout(request: Request):
+
+    request.session.clear()
+
+    return {
+        "message": "Logged out successfully"
+    }
+
+
+# =========================================================
+# ANALYZE EMAIL
+# =========================================================
+
+async def analyze_email_by_id(
+    email_id: int,
+    user_id: int
+):
+    """
+    Analyze an email that already exists in SQL.
+
+    IMPORTANT:
+    This function is the single source of truth
+    for email analysis.
+
+    Both:
+        POST /emails/{email_id}/analyze
+
+    and:
+
+        Gmail sync
+
+    use this same function.
+    """
+
+    # -----------------------------------------
+    # Get email
+    # -----------------------------------------
 
     with engine.connect() as connection:
 
-        result = connection.execute(
+        email = connection.execute(
             text("""
                 SELECT
                     emails.id,
-                    emails.gmail_account_id,
-                    emails.gmail_message_id,
                     emails.sender,
                     emails.subject,
-                    emails.body,
-                    emails.received_at
+                    emails.body
                 FROM emails
                 JOIN gmail_accounts
-                    ON gmail_accounts.id = emails.gmail_account_id
-                WHERE gmail_accounts.user_id = :user_id
-                ORDER BY emails.received_at DESC
+                    ON gmail_accounts.id =
+                       emails.gmail_account_id
+                WHERE
+                    emails.id = :email_id
+                    AND gmail_accounts.user_id = :user_id
             """),
             {
+                "email_id": email_id,
                 "user_id": user_id
             }
-        )
-
-        rows = result.fetchall()
-
-    emails = []
-
-    for row in rows:
-        emails.append({
-            "id": row[0],
-            "gmail_account_id": row[1],
-            "gmail_message_id": row[2],
-            "sender": row[3],
-            "subject": row[4],
-            "body": row[5],
-            "received_at": row[6]
-        })
-
-    return {
-        "count": len(emails),
-        "emails": emails
-    }
-
-@app.post("/emails/{email_id}/analyze")
-async def analyze_saved_email(email_id: int):
-
-    # 1. Get email from Supabase
-    with engine.connect() as connection:
-        result = connection.execute(
-            text("""
-                SELECT
-                    id,
-                    sender,
-                    subject,
-                    body
-                FROM emails
-                WHERE id = :email_id
-            """),
-            {
-                "email_id": email_id
-            }
-        )
-
-        email = result.fetchone()
+        ).fetchone()
 
     if not email:
-        return {
-            "error": "Email not found"
-        }
 
-    # 2. Prepare email for AI
+        raise HTTPException(
+            status_code=404,
+            detail="Email not found"
+        )
+
+    # -----------------------------------------
+    # Build AI input
+    # -----------------------------------------
+
     email_content = f"""
 From: {email[1]}
+
 Subject: {email[2]}
 
 Body:
 {email[3]}
 """
 
-    # 3. Create AI session
-    user_id = "email_analysis_user"
+    # -----------------------------------------
+    # Create fresh ADK session
+    # -----------------------------------------
+
+    analysis_user_id = f"inboxai_user_{user_id}"
+
     session_id = str(uuid.uuid4())
 
     await session_service.create_session(
         app_name="InboxAI",
-        user_id=user_id,
+        user_id=analysis_user_id,
         session_id=session_id,
     )
 
-    # 4. Send email to AI
+    # -----------------------------------------
+    # Send email to agent
+    # -----------------------------------------
+
     content = types.Content(
         role="user",
         parts=[
-            types.Part(text=email_content)
+            types.Part(
+                text=email_content
+            )
         ],
     )
 
-    # 5. Run AI workflow
     final_response = ""
 
-    async for event in runner.run_async(
-        user_id=user_id,
-        session_id=session_id,
-        new_message=content,
-    ):
-
-        if event.is_final_response():
-
-            if event.content and event.content.parts:
-
-                final_response = event.content.parts[0].text
-
-    # 6. Convert AI JSON string to Python dictionary
     try:
-        analysis = json.loads(final_response)
-    except json.JSONDecodeError:
-        return {
-            "error": "AI returned invalid JSON",
-            "raw_response": final_response
+        async for event in runner.run_async(
+            user_id=analysis_user_id,
+            session_id=session_id,
+            new_message=content,
+        ):
+
+            if event.is_final_response():
+
+                if (
+                    event.content
+                    and event.content.parts
+                ):
+
+                    final_response = (
+                        event.content.parts[0].text
+                    )
+    except Exception as error:
+        print(f"AI analysis failed for email {email_id}: {error}")
+
+    # -----------------------------------------
+    # Parse AI response
+    # -----------------------------------------
+
+    analysis = extract_json_object(final_response)
+    if not analysis:
+        analysis = {
+            "summary": email[2] or "Email received",
+            "task": "No task",
+            "deadline": "No deadline",
+            "priority": "Medium",
         }
 
-    # 7. Extract fields
-    summary = analysis.get("summary", "")
-    task = analysis.get("task", "No task")
-    deadline = analysis.get("deadline", "No deadline")
-    priority = analysis.get("priority", "Medium")
+    # -----------------------------------------
+    # Extract analysis
+    # -----------------------------------------
 
-    # 8. Save AI analysis to Supabase
+    summary = analysis.get("summary") or email[2] or "Email received"
+    task = analysis.get("task") or "No task"
+    deadline = analysis.get("deadline") or "No deadline"
+    priority = analysis.get("priority") or "Medium"
+
+    # -----------------------------------------
+    # SAVE ONLY ANALYSIS RESULT
+    # -----------------------------------------
+
     with engine.begin() as connection:
 
         connection.execute(
@@ -887,73 +753,412 @@ Body:
                 "task": task,
                 "deadline": deadline,
                 "priority": priority,
-                "email_id": email_id
+                "email_id": email_id,
             }
         )
 
-    # 9. Return result
+    return {
+        "summary": summary,
+        "task": task,
+        "deadline": deadline,
+        "priority": priority,
+    }
+
+
+# =========================================================
+# MANUAL EMAIL ANALYSIS
+# =========================================================
+
+@app.post("/emails/{email_id}/analyze")
+async def analyze_saved_email(
+    email_id: int,
+    request: Request
+):
+
+    user_id = require_user_id(request)
+
+    analysis = await analyze_email_by_id(
+        email_id=email_id,
+        user_id=user_id
+    )
+
     return {
         "message": "Email analyzed and saved successfully",
         "email_id": email_id,
-        "analysis": {
-            "summary": summary,
-            "task": task,
-            "deadline": deadline,
-            "priority": priority
-        }
+        "analysis": analysis
     }
 
-@app.get("/auth/me")
-async def get_current_user(request: Request):
 
-    user_id = request.session.get("user_id")
+# =========================================================
+# GET EMAILS
+# =========================================================
 
-    if not user_id:
-        return {
-            "logged_in": False,
-            "authenticated": False
-        }
+@app.get("/emails")
+async def get_emails(
+    request: Request
+):
+
+    user_id = require_user_id(request)
 
     with engine.connect() as connection:
-        result = connection.execute(
+
+        rows = connection.execute(
             text("""
-                SELECT id, email, name
-                FROM users
-                WHERE id = :user_id
+                SELECT
+                    emails.id,
+                    emails.gmail_account_id,
+                    emails.gmail_message_id,
+                    emails.sender,
+                    emails.subject,
+                    emails.body,
+                    emails.received_at,
+                    emails.summary,
+                    emails.task,
+                    emails.deadline,
+                    emails.priority
+                FROM emails
+                JOIN gmail_accounts
+                    ON gmail_accounts.id =
+                       emails.gmail_account_id
+                WHERE gmail_accounts.user_id = :user_id
+                ORDER BY emails.received_at DESC
             """),
             {
                 "user_id": user_id
             }
+        ).fetchall()
+
+    emails = []
+
+    for row in rows:
+
+        emails.append({
+            "id": row[0],
+            "gmail_account_id": row[1],
+            "gmail_message_id": row[2],
+            "sender": row[3],
+            "subject": row[4],
+            "body": row[5],
+            "received_at": row[6],
+            "summary": row[7],
+            "task": row[8],
+            "deadline": row[9],
+            "priority": row[10],
+        })
+
+    return emails
+
+
+# =========================================================
+# GMAIL EMAILS
+# =========================================================
+
+@app.get("/gmail/emails")
+async def get_gmail_emails(
+    request: Request
+):
+
+    user_id = require_user_id(request)
+
+    # -----------------------------------------
+    # Get Gmail account for logged-in user
+    # -----------------------------------------
+
+    with engine.connect() as connection:
+
+        gmail_account = connection.execute(
+            text("""
+                SELECT
+                    id,
+                    email,
+                    access_token,
+                    refresh_token,
+                    token_expiry
+                FROM gmail_accounts
+                WHERE user_id = :user_id
+            """),
+            {
+                "user_id": user_id
+            }
+        ).fetchone()
+
+    if not gmail_account:
+
+        raise HTTPException(
+            status_code=404,
+            detail="No Gmail account connected"
         )
-        user = result.fetchone()
 
-    if not user:
-        request.session.clear()
-        return {
-            "logged_in": False,
-            "authenticated": False
-        }
+    gmail_account_id = gmail_account[0]
+
+    # -----------------------------------------
+    # Google credentials
+    # -----------------------------------------
+
+    credentials = Credentials(
+        token=gmail_account[2],
+        refresh_token=gmail_account[3],
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=GOOGLE_CLIENT_ID,
+        client_secret=GOOGLE_CLIENT_SECRET,
+        scopes=GOOGLE_SCOPES,
+    )
+
+    # -----------------------------------------
+    # Gmail API
+    # -----------------------------------------
+
+    gmail_service = build(
+        "gmail",
+        "v1",
+        credentials=credentials
+    )
+
+    # -----------------------------------------
+    # Get latest messages
+    # -----------------------------------------
+
+    messages_response = (
+        gmail_service
+        .users()
+        .messages()
+        .list(
+            userId="me",
+            maxResults=10
+        )
+        .execute()
+    )
+
+    messages = messages_response.get(
+        "messages",
+        []
+    )
+
+    saved_emails = []
+
+    # =====================================================
+    # PROCESS EACH GMAIL MESSAGE
+    # =====================================================
+
+    for message_item in messages:
+
+        message_id = message_item["id"]
+
+        # -----------------------------------------
+        # Check duplicate
+        # -----------------------------------------
+
+        with engine.connect() as connection:
+
+            existing = connection.execute(
+                text("""
+                    SELECT id
+                    FROM emails
+                    WHERE
+                        gmail_account_id =
+                        :gmail_account_id
+
+                        AND gmail_message_id =
+                        :gmail_message_id
+                """),
+                {
+                    "gmail_account_id":
+                        gmail_account_id,
+
+                    "gmail_message_id":
+                        message_id,
+                }
+            ).fetchone()
+
+        # -----------------------------------------
+        # Already exists
+        # -----------------------------------------
+
+        if existing:
+
+            saved_emails.append({
+                "id": existing[0],
+                "gmail_message_id": message_id,
+                "status": "already_exists"
+            })
+
+            continue
+
+        # -----------------------------------------
+        # Get complete Gmail message
+        # -----------------------------------------
+
+        message = (
+            gmail_service
+            .users()
+            .messages()
+            .get(
+                userId="me",
+                id=message_id,
+                format="full"
+            )
+            .execute()
+        )
+
+        payload = message.get(
+            "payload",
+            {}
+        )
+
+        headers = payload.get(
+            "headers",
+            []
+        )
+
+        # -----------------------------------------
+        # Extract fields
+        # -----------------------------------------
+
+        sender = get_header(
+            headers,
+            "From"
+        )
+
+        subject = get_header(
+            headers,
+            "Subject"
+        )
+
+        date_header = get_header(
+            headers,
+            "Date"
+        )
+
+        received_at = parse_received_date(
+            date_header
+        )
+
+        body = extract_gmail_body(
+            payload
+        )
+
+        # =================================================
+        # STEP 1
+        # SAVE BASE EMAIL ONLY
+        # =================================================
+
+        with engine.begin() as connection:
+
+            result = connection.execute(
+                text("""
+                    INSERT INTO emails (
+                        gmail_account_id,
+                        gmail_message_id,
+                        sender,
+                        subject,
+                        body,
+                        received_at
+                    )
+                    VALUES (
+                        :gmail_account_id,
+                        :gmail_message_id,
+                        :sender,
+                        :subject,
+                        :body,
+                        :received_at
+                    )
+                    RETURNING id
+                """),
+                {
+                    "gmail_account_id":
+                        gmail_account_id,
+
+                    "gmail_message_id":
+                        message_id,
+
+                    "sender":
+                        sender,
+
+                    "subject":
+                        subject,
+
+                    "body":
+                        body,
+
+                    "received_at":
+                        received_at,
+                }
+            )
+
+            email_id = result.fetchone()[0]
+
+        # =================================================
+        # STEP 2
+        # ANALYZE SAME EMAIL
+        # =================================================
+
+        try:
+
+            analysis_response = await analyze_saved_email(
+                email_id=email_id,
+                request=request
+            )
+            analysis = analysis_response["analysis"]
+
+        except Exception as e:
+
+            print(
+                f"Analysis failed for email "
+                f"{email_id}: {e}"
+            )
+
+            analysis = None
+
+        # -----------------------------------------
+        # Response
+        # -----------------------------------------
+
+        saved_emails.append({
+            "id": email_id,
+            "gmail_message_id": message_id,
+            "sender": sender,
+            "subject": subject,
+            "status": "saved_and_analyzed",
+            "analysis": analysis
+        })
+
+    # -----------------------------------------
+    # Save refreshed token if needed
+    # -----------------------------------------
+
+    persist_gmail_tokens(
+        gmail_account_id,
+        credentials
+    )
 
     return {
-        "logged_in": True,
-        "authenticated": True,
-        "user_id": user[0],
-        "email": user[1],
-        "name": user[2]
+        "count": len(saved_emails),
+        "emails": saved_emails
     }
 
 
-@app.get("/auth/logout")
-@app.post("/auth/logout")
-async def logout(request: Request):
-    request.session.clear()
+# =========================================================
+# HEALTH CHECK
+# =========================================================
+
+@app.get("/")
+async def root():
+
     return {
-        "logged_in": False,
-        "authenticated": False
+        "message": "InboxAI backend is running"
     }
 
+
+# =========================================================
+# RUN
+# =========================================================
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8007)
 
+    import uvicorn
+
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=8007
+    )
