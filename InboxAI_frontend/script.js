@@ -10,18 +10,22 @@ const getApiBaseUrl = () => {
 
 const API_BASE_URL = getApiBaseUrl();
 
-// Visitor Session Storage for Isolated Sandboxes
-let sessionId = sessionStorage.getItem("inboxai_session_id");
-if (!sessionId) {
-    sessionId = "session_" + Math.random().toString(36).substring(2, 11);
-    sessionStorage.setItem("inboxai_session_id", sessionId);
-}
-
 const getHeaders = (extraHeaders = {}) => ({
     "Content-Type": "application/json",
-    "X-Session-ID": sessionId,
     ...extraHeaders
 });
+
+async function getUserEmails() {
+    const response = await fetch(`${API_BASE_URL}/emails`, {
+        credentials: "include"
+    });
+
+    if (response.status === 401) return [];
+    if (!response.ok) throw new Error(`Failed to fetch emails: ${response.status}`);
+
+    const data = await response.json();
+    return Array.isArray(data) ? data : (data.emails || []);
+}
 
 // Load authenticated user from server session
 // Load authenticated user from server session
@@ -83,21 +87,9 @@ async function loadCurrentUser() {
 
 async function loadInboxEmails() {
     try {
-        const response = await fetch(`${API_BASE_URL}/emails`, {
-            credentials: "include"
-        });
+        const emails = await getUserEmails();
 
-        if (response.status === 401) {
-            return;
-        }
-
-        if (!response.ok) {
-            throw new Error(`Failed to fetch emails: ${response.status}`);
-        }
-
-        const data = await response.json();
-
-        console.log("INBOX EMAILS:", data);
+        console.log("INBOX EMAILS:", emails);
 
         const emailList = document.getElementById("emailList");
 
@@ -105,7 +97,7 @@ async function loadInboxEmails() {
 
         emailList.innerHTML = "";
 
-        if (!data.emails || data.emails.length === 0) {
+        if (emails.length === 0) {
             emailList.innerHTML = `
                 <div class="empty-feature" style="padding: 50px 20px;">
                     <div class="big-icon">✉</div>
@@ -116,7 +108,7 @@ async function loadInboxEmails() {
             return;
         }
 
-        data.emails.forEach(email => {
+        emails.forEach(email => {
 
             const senderText = email.sender || "Unknown Sender";
 
@@ -226,14 +218,14 @@ async function loadInboxEmails() {
 
         if (inboxSubtitle) {
             inboxSubtitle.textContent =
-                `${data.count} messages · Gmail synced`;
+                `${emails.length} messages · Gmail synced`;
         }
 
         const countEl =
             document.getElementById("email-count");
 
         if (countEl) {
-            countEl.textContent = data.count;
+            countEl.textContent = emails.length;
         }
 
     } catch (error) {
@@ -259,6 +251,13 @@ async function loadInboxEmails() {
     }
 
     await loadInboxEmails();
+
+    if (isLoggedIn) {
+        await getAllTasks();
+        await pendingTasksCount();
+        await getPriorities();
+        await getDeadlines();
+    }
 })();
 
 const pages = document.querySelectorAll(".page");
@@ -305,9 +304,8 @@ function addMessage(text, type) {
 
 async function getTaskCount() {
     try {
-        const response = await fetch(`${API_BASE_URL}/tasks/count`, { headers: getHeaders() });
-        const data = await response.json();
-        const count = (data && typeof data.count === 'number') ? data.count : 0;
+        const emails = await getUserEmails();
+        const count = emails.length;
         const countEl = document.getElementById("email-count");
         if (countEl) countEl.textContent = count;
 
@@ -413,8 +411,8 @@ document.querySelectorAll(".task input").forEach(box => {
 
 async function getPriorities() {
     try {
-        const response = await fetch(`${API_BASE_URL}/tasks/priorities`, { headers: getHeaders() });
-        const tasks = await response.json();
+        const emails = await getUserEmails();
+        const tasks = emails.filter(email => email.task && email.task !== "No task");
 
         const items = document.querySelectorAll(".priority-item");
 
@@ -448,8 +446,8 @@ getPriorities();
 
 async function pendingTasksCount() {
     try {
-        const response = await fetch(`${API_BASE_URL}/tasks/pending/count`, { headers: getHeaders() });
-        const data = await response.json();
+        const emails = await getUserEmails();
+        const data = { count: emails.filter(email => email.task && email.task !== "No task").length };
         const pendingEl = document.getElementById("pending_tasks");
         if (pendingEl) pendingEl.textContent = data.count ?? 0;
     } catch (err) {
@@ -460,18 +458,9 @@ async function pendingTasksCount() {
 pendingTasksCount();
 async function getAllTasks() {
     try {
-        const response = await fetch(
-            `${API_BASE_URL}/tasks/all`,
-            {
-                headers: getHeaders()
-            }
+        const tasks = (await getUserEmails()).filter(
+            email => email.task && email.task !== "No task"
         );
-
-        if (!response.ok) {
-            throw new Error(`Failed to fetch tasks: ${response.status}`);
-        }
-
-        const tasks = await response.json();
 
         const todoList =
             document.getElementById("todo-list");
@@ -508,8 +497,7 @@ async function getAllTasks() {
                     ? "amber"
                     : "green";
 
-            const isCompleted =
-                task.status === "Completed";
+            const isCompleted = false;
 
             if (isCompleted) {
                 completedNum++;
@@ -579,14 +567,6 @@ async function getAllTasks() {
                                 ? "Completed"
                                 : "pending";
 
-                        await fetch(
-                            `${API_BASE_URL}/tasks/status?task_id=${encodeURIComponent(task.id || "")}&task_name=${encodeURIComponent(task.task || "")}&status=${status}`,
-                            {
-                                method: "PUT",
-                                headers: getHeaders()
-                            }
-                        );
-
                         getAllTasks();
                         pendingTasksCount();
                         getDeadlines();
@@ -620,8 +600,7 @@ const priorityRank = {
 
 async function getDeadlines() {
     try {
-        const response = await fetch(`${API_BASE_URL}/tasks/all`, { headers: getHeaders() });
-        const tasks = await response.json();
+        const tasks = await getUserEmails();
         const deadlineGrid = document.getElementById("deadlineGrid");
         if (!deadlineGrid) return;
 
@@ -630,7 +609,7 @@ async function getDeadlines() {
             t.deadline && 
             t.deadline.toLowerCase() !== "no deadline" && 
             t.deadline.trim() !== "" &&
-            t.status !== "Completed"
+            t.task && t.task !== "No task"
         );
 
         // Sort strictly by Priority: High (1) -> Medium (2) -> Low (3)
@@ -704,36 +683,23 @@ if (newTaskForm) {
 
         if (!taskTitle || !taskDeadline) return;
 
-        try {
-            await fetch(`${API_BASE_URL}/save_task`, {
-                method: "POST",
-                headers: getHeaders(),
-                body: JSON.stringify({
-                    summary: taskTitle,
-                    task: taskTitle,
-                    deadline: taskDeadline,
-                    priority: taskPriority
-                })
-            });
-
-            newTaskForm.reset();
-            toggleModal(false);
-            getAllTasks();
-            pendingTasksCount();
-            getPriorities();
-            getTaskCount();
-            getDeadlines();
-        } catch (err) {
-            console.error("Error creating task:", err);
-        }
+        console.warn(
+            "Manual tasks are not persisted. Tasks are extracted from analyzed emails."
+        );
+        newTaskForm.reset();
+        toggleModal(false);
     });
 }
 
 const urgentCountEl = document.getElementById("urgent-emails");
 async function updateUrgentCount() {
     try {
-        const response = await fetch(`${API_BASE_URL}/tasks/urgent`);
-        urgentCountEl.textContent = await response.text();
+        const emails = await getUserEmails();
+        const urgentCount = emails.filter(email => {
+            return email.task && email.task !== "No task" &&
+                (email.priority || "").toLowerCase() === "high";
+        }).length;
+        if (urgentCountEl) urgentCountEl.textContent = urgentCount;
     } catch (err) {
         console.error("Error updating urgent count:", err);
     }

@@ -40,7 +40,7 @@ The system can:
 4. Determine its priority.
 5. Extract the task.
 6. Extract the deadline.
-7. Store the resulting task.
+7. Store the resulting analysis on the same SQL email row.
 8. Return the structured information to the user.
 
 The system is designed as an **Agentic AI workflow**, where each agent has a specific responsibility.
@@ -79,8 +79,9 @@ The system is designed as an **Agentic AI workflow**, where each agent has a spe
                               │
                               ▼
                      ┌──────────────────┐
-                     │      Redis       │
-                     │   Task Storage   │
+                     │   SQL Database   │
+                     │ Users, Gmail,   │
+                     │ Emails, Analysis│
                      └──────────────────┘
 ```
 
@@ -181,9 +182,7 @@ Priority Detection
   ↓
 Task Extraction
   ↓
-Create / Save Task
-  ↓
-Redis
+Update Email Analysis in SQL
 ```
 
 This architecture makes it possible to add additional agents in the future without redesigning the entire application.
@@ -250,10 +249,10 @@ The structured task is sent to the backend through an API.
 
 ```text
 AI Agents
-    ↓
+  ↓
 FastAPI
-    ↓
-Redis
+  ↓
+SQL Database
 ```
 
 ### Final Result
@@ -331,7 +330,7 @@ New agents can also be added later for features such as sentiment analysis, emai
 
 ## Database / Storage
 
-* **Redis**
+* **PostgreSQL / Supabase**
 
 ## Development
 
@@ -372,10 +371,10 @@ InboxAI/
 
 The AI agents communicate with the backend through APIs.
 
-For example, a task can be sent to FastAPI:
+Email analysis is saved through the shared email-analysis endpoint:
 
 ```http
-POST /save_task
+POST /emails/{email_id}/analyze
 ```
 
 with structured data such as:
@@ -388,16 +387,16 @@ with structured data such as:
 }
 ```
 
-The backend then stores the information in Redis.
+The backend then updates the same email row in SQL.
 
 ```text
-Agent
+Gmail Email
   ↓
-HTTP Request
+SQL Base Email
   ↓
-FastAPI
+FastAPI Analysis Endpoint
   ↓
-Redis
+SQL Analysis Fields
 ```
 
 This separation between the **AI layer** and **backend layer** makes the architecture cleaner and easier to maintain.
@@ -439,9 +438,6 @@ Create a `.env` file:
 GOOGLE_API_KEY=your_google_api_key
 GROQ_API_KEY=your_groq_api_key
 
-REDIS_HOST=your_redis_host
-REDIS_PORT=your_redis_port
-REDIS_PASSWORD=your_redis_password
 ```
 
 **Do not upload `.env` or API keys to GitHub.**
