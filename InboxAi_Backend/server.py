@@ -1,10 +1,13 @@
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request as GoogleRequest
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from google.adk.runners import Runner
@@ -21,7 +24,7 @@ import uuid
 import base64
 import re
 from email.utils import parsedate_to_datetime
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 # =========================================================
@@ -60,10 +63,9 @@ app.add_middleware(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        "http://localhost:5500",
         "http://localhost:3000",
         "http://localhost:5173",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:5173",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -97,8 +99,8 @@ GOOGLE_REDIRECT_URI = os.getenv(
 
 GOOGLE_SCOPES = [
     "openid",
-    "email",
-    "profile",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
     "https://www.googleapis.com/auth/gmail.readonly",
 ]
 
@@ -243,6 +245,14 @@ def parse_received_date(date_string):
     if not date_string:
         return None
 
+    try:
+        return parsedate_to_datetime(
+            date_string
+        )
+
+    except Exception:
+        return None
+
 
 def extract_json_object(raw_response):
     if not raw_response:
@@ -260,15 +270,6 @@ def extract_json_object(raw_response):
         return json.loads(match.group(0))
     except json.JSONDecodeError:
         return None
-
-    try:
-        return parsedate_to_datetime(
-            date_string
-        )
-
-    except Exception:
-        return None
-
 
 def persist_gmail_tokens(
     gmail_account_id,
@@ -314,6 +315,7 @@ def persist_gmail_tokens(
 @app.get("/auth/google/login")
 async def google_login(request: Request):
 
+    print("[auth/google/login] Starting OAuth flow")
     flow = get_google_flow()
 
     authorization_url, state = flow.authorization_url(
@@ -323,10 +325,9 @@ async def google_login(request: Request):
     )
 
     request.session["oauth_state"] = state
+    request.session["oauth_code_verifier"] = flow.code_verifier
 
-    return {
-        "authorization_url": authorization_url
-    }
+    return RedirectResponse(url=authorization_url)
 
 
 # =========================================================
@@ -346,11 +347,30 @@ async def google_callback(
             detail="Missing authorization code"
         )
 
-    flow = get_google_flow()
+    returned_state = request.query_params.get("state")
+    expected_state = request.session.pop("oauth_state", None)
+    if not expected_state or returned_state != expected_state:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid OAuth state"
+        )
 
-    flow.fetch_token(code=code)
+    flow = get_google_flow()
+    code_verifier = request.session.pop("oauth_code_verifier", None)
+
+    if not code_verifier:
+        raise HTTPException(
+            status_code=400,
+            detail="OAuth session expired. Please start Gmail connection again."
+        )
+
+    flow.fetch_token(
+        code=code,
+        code_verifier=code_verifier
+    )
 
     credentials = flow.credentials
+    print("[auth/google/callback] Token exchange succeeded")
 
     # -----------------------------------------
     # Get Google user information
@@ -373,6 +393,8 @@ async def google_callback(
             status_code=400,
             detail="Could not get Google user information"
         )
+
+    print(f"[auth/google/callback] Google user={email}")
 
     # -----------------------------------------
     # Create / update user
@@ -434,6 +456,7 @@ async def google_callback(
             )
 
             user_id = result.fetchone()[0]
+            print(f"[auth/google/callback] Created user_id={user_id}")
 
     # -----------------------------------------
     # Gmail account
@@ -460,7 +483,7 @@ async def google_callback(
                 text("""
                     UPDATE gmail_accounts
                     SET
-                        email = :email,
+                        gmail_email = :email,
                         access_token = :access_token,
                         refresh_token = COALESCE(
                             :refresh_token,
@@ -477,6 +500,7 @@ async def google_callback(
                     "gmail_account_id": gmail_account_id,
                 }
             )
+            print(f"[auth/google/callback] Updated gmail_account_id={gmail_account_id}")
 
         else:
 
@@ -484,7 +508,7 @@ async def google_callback(
                 text("""
                     INSERT INTO gmail_accounts (
                         user_id,
-                        email,
+                        gmail_email,
                         access_token,
                         refresh_token,
                         token_expiry
@@ -508,6 +532,7 @@ async def google_callback(
             )
 
             gmail_account_id = result.fetchone()[0]
+            print(f"[auth/google/callback] Created gmail_account_id={gmail_account_id}")
 
     # -----------------------------------------
     # Create login session
@@ -516,13 +541,14 @@ async def google_callback(
     request.session["user_id"] = user_id
     request.session["email"] = email
     request.session["name"] = name
+    print(f"[auth/google/callback] Session user_id={user_id}")
 
-    return {
-        "message": "Login successful",
-        "user_id": user_id,
-        "email": email,
-        "name": name,
-    }
+    return RedirectResponse(
+        url=os.getenv(
+            "FRONTEND_URL",
+            "http://localhost:5500/InboxAI_frontend/index.html"
+        )
+    )
 
 
 # =========================================================
@@ -533,13 +559,10 @@ async def google_callback(
 async def auth_me(request: Request):
 
     user_id = request.session.get("user_id")
+    print(f"[auth/me] session user_id={user_id}")
 
     if not user_id:
-
-        return {
-            "logged_in": False,
-            "authenticated": False
-        }
+        raise HTTPException(status_code=401, detail="Not logged in")
 
     with engine.connect() as connection:
 
@@ -547,6 +570,7 @@ async def auth_me(request: Request):
             text("""
                 SELECT
                     id,
+                    created_at,
                     email,
                     name
                 FROM users
@@ -560,18 +584,14 @@ async def auth_me(request: Request):
     if not user:
 
         request.session.clear()
-
-        return {
-            "logged_in": False,
-            "authenticated": False
-        }
+        raise HTTPException(status_code=401, detail="Not logged in")
 
     return {
         "logged_in": True,
         "authenticated": True,
         "id": user[0],
-        "email": user[1],
-        "name": user[2],
+        "email": user[2],
+        "name": user[3],
     }
 
 
@@ -583,6 +603,7 @@ async def auth_me(request: Request):
 async def logout(request: Request):
 
     request.session.clear()
+    print("[auth/logout] Session cleared")
 
     return {
         "message": "Logged out successfully"
@@ -613,6 +634,8 @@ async def analyze_email_by_id(
 
     use this same function.
     """
+
+    print(f"[analysis] Starting email_id={email_id} user_id={user_id}")
 
     # -----------------------------------------
     # Get email
@@ -757,6 +780,8 @@ Body:
             }
         )
 
+    print(f"[analysis] Saved analysis for email_id={email_id}")
+
     return {
         "summary": summary,
         "task": task,
@@ -799,6 +824,7 @@ async def get_emails(
 ):
 
     user_id = require_user_id(request)
+    print(f"[/emails] Loading emails for user_id={user_id}")
 
     with engine.connect() as connection:
 
@@ -859,6 +885,7 @@ async def get_gmail_emails(
 ):
 
     user_id = require_user_id(request)
+    print(f"[/gmail/emails] Sync requested for user_id={user_id}")
 
     # -----------------------------------------
     # Get Gmail account for logged-in user
@@ -870,7 +897,7 @@ async def get_gmail_emails(
             text("""
                 SELECT
                     id,
-                    email,
+                    gmail_email,
                     access_token,
                     refresh_token,
                     token_expiry
@@ -895,14 +922,28 @@ async def get_gmail_emails(
     # Google credentials
     # -----------------------------------------
 
+    token_expiry = gmail_account[4]
+    if token_expiry:
+        try:
+            token_expiry = datetime.fromisoformat(
+                str(token_expiry).replace("Z", "+00:00")
+            )
+        except ValueError:
+            token_expiry = None
+
     credentials = Credentials(
         token=gmail_account[2],
         refresh_token=gmail_account[3],
+        expiry=token_expiry,
         token_uri="https://oauth2.googleapis.com/token",
         client_id=GOOGLE_CLIENT_ID,
         client_secret=GOOGLE_CLIENT_SECRET,
         scopes=GOOGLE_SCOPES,
     )
+
+    if credentials.expired and credentials.refresh_token:
+        print(f"[/gmail/emails] Refreshing Gmail token for account_id={gmail_account_id}")
+        credentials.refresh(GoogleRequest())
 
     # -----------------------------------------
     # Gmail API
@@ -933,8 +974,10 @@ async def get_gmail_emails(
         "messages",
         []
     )
+    print(f"[/gmail/emails] Gmail returned {len(messages)} messages")
 
     saved_emails = []
+    inserted_count = 0
 
     # =====================================================
     # PROCESS EACH GMAIL MESSAGE
@@ -1033,6 +1076,12 @@ async def get_gmail_emails(
             date_header
         )
 
+        if received_at is None and message.get("internalDate"):
+            received_at = datetime.fromtimestamp(
+                int(message["internalDate"]) / 1000,
+                tz=timezone.utc
+            )
+
         body = extract_gmail_body(
             payload
         )
@@ -1086,6 +1135,7 @@ async def get_gmail_emails(
             )
 
             email_id = result.fetchone()[0]
+            inserted_count += 1
 
         # =================================================
         # STEP 2
@@ -1094,11 +1144,12 @@ async def get_gmail_emails(
 
         try:
 
-            analysis_response = await analyze_saved_email(
+            print(f"[/gmail/emails] Analyzing email_id={email_id}")
+
+            analysis = await analyze_email_by_id(
                 email_id=email_id,
-                request=request
+                user_id=user_id
             )
-            analysis = analysis_response["analysis"]
 
         except Exception as e:
 
@@ -1131,10 +1182,63 @@ async def get_gmail_emails(
         credentials
     )
 
+    print(f"[/gmail/emails] Inserted {inserted_count} new emails")
+
     return {
         "count": len(saved_emails),
         "emails": saved_emails
     }
+
+
+# =========================================================
+# DELETE TASK EMAIL
+# =========================================================
+
+@app.delete("/tasks/{task_id}")
+async def delete_task(
+    task_id: int,
+    request: Request
+):
+
+    user_id = require_user_id(request)
+
+    try:
+        with engine.begin() as connection:
+            result = connection.execute(
+                text("""
+                    DELETE FROM emails
+                    WHERE id = :task_id
+                      AND gmail_account_id IN (
+                          SELECT id
+                          FROM gmail_accounts
+                          WHERE user_id = :user_id
+                      )
+                """),
+                {
+                    "task_id": task_id,
+                    "user_id": user_id,
+                }
+            )
+
+        if result.rowcount == 0:
+            raise HTTPException(
+                status_code=404,
+                detail="Task email not found"
+            )
+
+        return {
+            "message": "Task deleted successfully",
+            "task_id": task_id,
+        }
+
+    except HTTPException:
+        raise
+    except SQLAlchemyError as error:
+        print(f"Task deletion failed for email {task_id}: {error}")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to delete task"
+        )
 
 
 # =========================================================
