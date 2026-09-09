@@ -37,6 +37,8 @@ button { cursor: pointer; }
 .avatar { width: 32px; height: 32px; font-size: 12px; }
 .profile strong { display: block; font-size: 12px; }
 .profile span:not(.dots) { display: block; font-size: 9px; color: var(--muted); margin-top: 3px; }
+.logout-btn { border: 0; background: transparent; color: var(--muted); font-size: 9px; padding: 4px; cursor: pointer; }
+.logout-btn:hover { color: var(--red); }
 .dots { margin-left: auto; color: #a3a7b3; }
 .main { margin-left: 248px; width: calc(100% - 248px); padding: 0 46px 50px; }
 .topbar { height: 70px; display: flex; justify-content: flex-end; align-items: center; }
@@ -115,6 +117,9 @@ h3 { font-size: 14px; margin: 7px 0; }
 .task input { accent-color: var(--primary); }
 .task > div { flex: 1; }
 .task strong { display: block; font-size: 10px; } .task p { color: var(--muted); font-size: 8px; margin: 4px 0 0; }
+.delete-task-btn { border: 0; background: transparent; color: var(--red); padding: 5px; font-size: 15px; line-height: 1; opacity: .85; }
+.delete-task-btn:hover { opacity: 1; background: var(--red-soft); border-radius: 6px; }
+.delete-task-btn:disabled { cursor: wait; opacity: .45; }
 .task.done strong { text-decoration: line-through; color: #9da1ad; }
 .deadline-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; }
 .deadline-card { padding: 22px; border-radius: 14px; border: 1px solid var(--border); background: var(--surface); box-shadow: var(--shadow); position: relative; }

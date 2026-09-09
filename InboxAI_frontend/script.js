@@ -1,14 +1,5 @@
-// Dynamic Backend API Host Resolution
-const getApiBaseUrl = () => {
-    if (window.INBOXAI_CONFIG && window.INBOXAI_CONFIG.API_BASE_URL) {
-        return window.INBOXAI_CONFIG.API_BASE_URL;
-    }
-    const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-    return isLocalhost ? "http://localhost:8007" : "https://inboxai.fastapicloud.dev";
-
-};
-
-const API_BASE_URL = getApiBaseUrl();
+const API_BASE_URL = "http://localhost:8007";
+let isAuthenticated = false;
 
 const getHeaders = (extraHeaders = {}) => ({
     "Content-Type": "application/json",
@@ -35,6 +26,12 @@ async function loadCurrentUser() {
             credentials: "include"
         });
 
+        if (response.status === 401) {
+            isAuthenticated = false;
+            setLoggedOutState();
+            return null;
+        }
+
         if (!response.ok) {
             throw new Error(`Auth request failed: ${response.status}`);
         }
@@ -43,6 +40,7 @@ async function loadCurrentUser() {
         console.log("AUTH ME DATA:", data);
 
         if (data.logged_in || data.authenticated) {
+            isAuthenticated = true;
 
             const displayName = data.name || data.email || "User";
             const email = data.email || "";
@@ -74,7 +72,8 @@ async function loadCurrentUser() {
             }
 
         } else {
-            console.log("User is not authenticated.");
+            isAuthenticated = false;
+            setLoggedOutState();
         }
 
         return data;
@@ -241,23 +240,27 @@ async function loadInboxEmails() {
     const isLoggedIn = data && (data.logged_in || data.authenticated);
 
     if (isLoggedIn) {
+        setLoggedInState();
         try {
-            await fetch(`${API_BASE_URL}/gmail/emails`, {
+            const syncResponse = await fetch(`${API_BASE_URL}/gmail/emails`, {
                 credentials: "include"
             });
+            if (!syncResponse.ok) {
+                throw new Error(`Gmail sync failed: ${syncResponse.status}`);
+            }
         } catch (error) {
             console.error("Error syncing Gmail:", error);
         }
-    }
 
-    await loadInboxEmails();
-
-    if (isLoggedIn) {
+        await loadInboxEmails();
         await getAllTasks();
         await pendingTasksCount();
         await getPriorities();
         await getDeadlines();
+        return;
     }
+
+    setLoggedOutState();
 })();
 
 const pages = document.querySelectorAll(".page");
@@ -319,8 +322,6 @@ async function getTaskCount() {
         if (countEl) countEl.textContent = 0;
     }
 }
-
-getTaskCount();
 
 function addThinkingIndicator() {
     const row = document.createElement("div");
@@ -442,8 +443,6 @@ async function getPriorities() {
     }
 }
 
-getPriorities();
-
 async function pendingTasksCount() {
     try {
         const emails = await getUserEmails();
@@ -455,7 +454,6 @@ async function pendingTasksCount() {
     }
 }
 
-pendingTasksCount();
 async function getAllTasks() {
     try {
         const tasks = (await getUserEmails()).filter(
@@ -531,6 +529,13 @@ async function getAllTasks() {
                     </p>
                 </div>
 
+                <button
+                    type="button"
+                    class="delete-task-btn"
+                    aria-label="Delete task"
+                    title="Delete task"
+                >🗑️</button>
+
                 <span class="tag ${tagClass}">
                     ${task.priority || "Medium"}
                 </span>
@@ -555,6 +560,15 @@ async function getAllTasks() {
 
             const checkbox =
                 taskElement.querySelector("input");
+
+            const deleteButton =
+                taskElement.querySelector(".delete-task-btn");
+
+            if (deleteButton) {
+                deleteButton.addEventListener("click", () =>
+                    deleteTask(task.id, taskElement, deleteButton)
+                );
+            }
 
             if (checkbox) {
 
@@ -648,9 +662,6 @@ async function getDeadlines() {
     }
 }
 
-getAllTasks();
-getDeadlines();
-
 // New Task Modal Logic
 const newTaskModal = document.getElementById("newTaskModal");
 const openNewTaskBtn = document.getElementById("openNewTaskModal");
@@ -713,5 +724,74 @@ const connectGmailBtn = document.getElementById("connectGmailBtn");
 if (connectGmailBtn) {
     connectGmailBtn.addEventListener("click", () => {
         window.location.href = `${API_BASE_URL}/auth/google/login`;
+    });
+}
+
+async function deleteTask(taskId, taskElement, deleteButton) {
+    if (!taskId || !deleteButton) return;
+
+    deleteButton.disabled = true;
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/tasks/${taskId}`, {
+            method: "DELETE",
+            credentials: "include"
+        });
+
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(data.detail || "Unable to delete this task.");
+        }
+
+        taskElement.remove();
+        await Promise.all([
+            pendingTasksCount(),
+            getPriorities(),
+            getDeadlines(),
+        ]);
+        await getAllTasks();
+    } catch (error) {
+        deleteButton.disabled = false;
+        window.alert(error.message || "Unable to delete this task.");
+    }
+}
+
+function setLoggedOutState() {
+    document.querySelectorAll(".user-name").forEach(element => {
+        element.textContent = "User";
+    });
+    document.querySelectorAll(".user-email").forEach(element => {
+        element.textContent = "Not signed in";
+    });
+    ["userAvatar", "topAvatar"].forEach(id => {
+        const avatar = document.getElementById(id);
+        if (avatar) avatar.textContent = "U";
+    });
+    const logoutButton = document.getElementById("logoutBtn");
+    if (logoutButton) logoutButton.hidden = true;
+    const loginButton = document.getElementById("connectGmailBtn");
+    if (loginButton) loginButton.textContent = "Log in with Google";
+}
+
+function setLoggedInState() {
+    const logoutButton = document.getElementById("logoutBtn");
+    if (logoutButton) logoutButton.hidden = false;
+    const loginButton = document.getElementById("connectGmailBtn");
+    if (loginButton) loginButton.textContent = "Sync Gmail";
+}
+
+const logoutButton = document.getElementById("logoutBtn");
+if (logoutButton) {
+    logoutButton.addEventListener("click", async () => {
+        try {
+            await fetch(`${API_BASE_URL}/auth/logout`, {
+                method: "POST",
+                credentials: "include"
+            });
+        } finally {
+            isAuthenticated = false;
+            setLoggedOutState();
+            window.location.reload();
+        }
     });
 }
