@@ -446,7 +446,13 @@ async function getPriorities() {
 async function pendingTasksCount() {
     try {
         const emails = await getUserEmails();
-        const data = { count: emails.filter(email => email.task && email.task !== "No task").length };
+        const data = {
+            count: emails.filter(email =>
+                email.task &&
+                email.task !== "No task" &&
+                email.status === "Pending"
+            ).length
+        };
         const pendingEl = document.getElementById("pending_tasks");
         if (pendingEl) pendingEl.textContent = data.count ?? 0;
     } catch (err) {
@@ -457,7 +463,10 @@ async function pendingTasksCount() {
 async function getAllTasks() {
     try {
         const tasks = (await getUserEmails()).filter(
-            email => email.task && email.task !== "No task"
+            email =>
+                email.task &&
+                email.task !== "No task" &&
+                (email.status === "Pending" || email.status === "Completed")
         );
 
         const todoList =
@@ -495,7 +504,7 @@ async function getAllTasks() {
                     ? "amber"
                     : "green";
 
-            const isCompleted = false;
+            const isCompleted = task.status === "Completed";
 
             if (isCompleted) {
                 completedNum++;
@@ -576,14 +585,38 @@ async function getAllTasks() {
                     "change",
                     async () => {
 
-                        const status =
-                            checkbox.checked
-                                ? "Completed"
-                                : "pending";
+                        const status = checkbox.checked
+                            ? "Completed"
+                            : "Pending";
 
-                        getAllTasks();
-                        pendingTasksCount();
-                        getDeadlines();
+                        checkbox.disabled = true;
+
+                        try {
+                            const response = await fetch(
+                                `${API_BASE_URL}/emails/${task.id}/status`,
+                                {
+                                    method: "PATCH",
+                                    headers: getHeaders(),
+                                    credentials: "include",
+                                    body: JSON.stringify({ status }),
+                                }
+                            );
+
+                            const data = await response.json().catch(() => ({}));
+                            if (!response.ok) {
+                                throw new Error(data.detail || "Unable to update task status.");
+                            }
+
+                            await getAllTasks();
+                            await pendingTasksCount();
+                            await getDeadlines();
+                        } catch (error) {
+                            checkbox.checked = !checkbox.checked;
+                            taskElement.classList.toggle("done", checkbox.checked);
+                            window.alert(error.message || "Unable to update task status.");
+                        } finally {
+                            checkbox.disabled = false;
+                        }
                     }
                 );
             }
@@ -604,7 +637,6 @@ async function getAllTasks() {
         );
     }
 }
-
 
 const priorityRank = {
     "high": 1,
@@ -795,3 +827,4 @@ if (logoutButton) {
         }
     });
 }
+

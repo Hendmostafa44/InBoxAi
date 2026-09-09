@@ -841,12 +841,15 @@ async def get_emails(
                     emails.summary,
                     emails.task,
                     emails.deadline,
-                    emails.priority
+                    emails.priority,
+                    emails.is_deleted,
+                    emails.status
                 FROM emails
                 JOIN gmail_accounts
                     ON gmail_accounts.id =
                        emails.gmail_account_id
-                WHERE gmail_accounts.user_id = :user_id
+                                WHERE gmail_accounts.user_id = :user_id
+                                    AND emails.is_deleted = FALSE
                 ORDER BY emails.received_at DESC
             """),
             {
@@ -870,9 +873,69 @@ async def get_emails(
             "task": row[8],
             "deadline": row[9],
             "priority": row[10],
+            "is_deleted": row[11],
+            "status": row[12],
         })
 
     return emails
+
+
+# =========================================================
+# UPDATE EMAIL TASK STATUS
+# =========================================================
+
+@app.patch("/emails/{email_id}/status")
+async def update_email_status(
+    email_id: int,
+    request: Request,
+):
+
+    user_id = require_user_id(request)
+    payload = await request.json()
+    status = payload.get("status") if isinstance(payload, dict) else None
+
+    if status not in {"Pending", "Completed"}:
+        raise HTTPException(
+            status_code=400,
+            detail="Status must be Pending or Completed",
+        )
+
+    try:
+        with engine.begin() as connection:
+            result = connection.execute(
+                text("""
+                    UPDATE emails
+                    SET status = :status
+                    WHERE id = :email_id
+                        AND is_deleted = FALSE
+                        AND gmail_account_id IN (
+                            SELECT id
+                            FROM gmail_accounts
+                            WHERE user_id = :user_id
+                        )
+                """),
+                {
+                    "email_id": email_id,
+                    "status": status,
+                    "user_id": user_id,
+                },
+            )
+
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Email not found")
+
+        return {
+            "email_id": email_id,
+            "status": status,
+        }
+    except HTTPException:
+        raise
+    except SQLAlchemyError as error:
+        print(f"Email status update failed for {email_id}: {error}")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to update email status",
+        )
 
 
 # =========================================================
@@ -995,7 +1058,7 @@ async def get_gmail_emails(
 
             existing = connection.execute(
                 text("""
-                    SELECT id
+                    SELECT id, is_deleted
                     FROM emails
                     WHERE
                         gmail_account_id =
@@ -1018,13 +1081,10 @@ async def get_gmail_emails(
         # -----------------------------------------
 
         if existing:
-
-            saved_emails.append({
-                "id": existing[0],
-                "gmail_message_id": message_id,
-                "status": "already_exists"
-            })
-
+            print(
+                f"[/gmail/emails] Skipping existing email_id={existing[0]} "
+                f"deleted={existing[1]}"
+            )
             continue
 
         # -----------------------------------------
@@ -1101,7 +1161,9 @@ async def get_gmail_emails(
                         sender,
                         subject,
                         body,
-                        received_at
+                        received_at,
+                        status,
+                        is_deleted
                     )
                     VALUES (
                         :gmail_account_id,
@@ -1109,8 +1171,12 @@ async def get_gmail_emails(
                         :sender,
                         :subject,
                         :body,
-                        :received_at
+                        :received_at,
+                        'Pending',
+                        FALSE
                     )
+                    ON CONFLICT (gmail_account_id, gmail_message_id)
+                    DO NOTHING
                     RETURNING id
                 """),
                 {
@@ -1134,7 +1200,15 @@ async def get_gmail_emails(
                 }
             )
 
-            email_id = result.fetchone()[0]
+            inserted_email = result.fetchone()
+
+            if not inserted_email:
+                print(
+                    f"[/gmail/emails] Skipping duplicate message_id={message_id}"
+                )
+                continue
+
+            email_id = inserted_email[0]
             inserted_count += 1
 
         # =================================================
@@ -1206,9 +1280,11 @@ async def delete_task(
         with engine.begin() as connection:
             result = connection.execute(
                 text("""
-                    DELETE FROM emails
-                    WHERE id = :task_id
-                      AND gmail_account_id IN (
+                                        UPDATE emails
+                                        SET is_deleted = TRUE
+                                        WHERE id = :task_id
+                                            AND is_deleted = FALSE
+                                            AND gmail_account_id IN (
                           SELECT id
                           FROM gmail_accounts
                           WHERE user_id = :user_id
@@ -1227,7 +1303,7 @@ async def delete_task(
             )
 
         return {
-            "message": "Task deleted successfully",
+            "message": "Email deleted from InboxAI",
             "task_id": task_id,
         }
 
