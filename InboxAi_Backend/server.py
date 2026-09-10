@@ -15,6 +15,14 @@ from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
 from agents.agent import root_agent
+from send_mail_agent.agent import (
+    is_cancellation,
+    is_confirmation,
+    is_send_request,
+    modify_draft,
+    prepare_draft,
+)
+from send_mail_agent.gmail import get_gmail_account, send_email
 
 from dotenv import load_dotenv
 
@@ -102,6 +110,7 @@ GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/userinfo.profile",
     "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.send",
 ]
 
 
@@ -368,8 +377,9 @@ async def google_callback(
         code=code,
         code_verifier=code_verifier
     )
-
+    
     credentials = flow.credentials
+    print("GRANTED SCOPES:", credentials.scopes)
     print("[auth/google/callback] Token exchange succeeded")
 
     # -----------------------------------------
@@ -788,6 +798,109 @@ Body:
         "deadline": deadline,
         "priority": priority,
     }
+
+
+async def run_assistant_message(request: Request, user_id: int, message: str) -> str:
+    assistant_user_id = f"inboxai_user_{user_id}"
+    session_id = request.session.get("adk_session_id")
+
+    if not session_id:
+        session_id = str(uuid.uuid4())
+        await session_service.create_session(
+            app_name="InboxAI",
+            user_id=assistant_user_id,
+            session_id=session_id,
+        )
+        request.session["adk_session_id"] = session_id
+
+    content = types.Content(
+        role="user",
+        parts=[types.Part(text=message)],
+    )
+
+    final_response = ""
+    async for event in runner.run_async(
+        user_id=assistant_user_id,
+        session_id=session_id,
+        new_message=content,
+    ):
+        if event.is_final_response() and event.content and event.content.parts:
+            final_response = event.content.parts[0].text or ""
+
+    return final_response or "I could not generate a response. Please try again."
+
+
+def format_email_draft(draft: dict[str, str]) -> str:
+    return (
+        "Here is the email I prepared:\n\n"
+        f"To: {draft['recipient']}\n"
+        f"Subject: {draft['subject']}\n\n"
+        f"{draft['body']}\n\n"
+        "Would you like me to send it?"
+    )
+
+
+@app.post("/analyze")
+async def analyze_message(request: Request):
+    user_id = require_user_id(request)
+    payload = await request.json()
+    message = payload.get("message", "").strip() if isinstance(payload, dict) else ""
+
+    if not message:
+        raise HTTPException(status_code=400, detail="Message is required")
+
+    pending_draft = request.session.get("pending_email_draft")
+
+    if pending_draft:
+        if is_confirmation(message):
+            try:
+                send_email(
+                    engine=engine,
+                    user_id=user_id,
+                    draft=pending_draft,
+                    client_id=GOOGLE_CLIENT_ID,
+                    client_secret=GOOGLE_CLIENT_SECRET,
+                    scopes=GOOGLE_SCOPES,
+                )
+            except RuntimeError as error:
+                return {"response": str(error)}
+
+            request.session.pop("pending_email_draft", None)
+            return {"response": "Email sent successfully."}
+
+        if is_cancellation(message):
+            request.session.pop("pending_email_draft", None)
+            return {"response": "Okay, I cancelled the email."}
+
+        updated_draft = modify_draft(pending_draft, message)
+        request.session["pending_email_draft"] = updated_draft
+        return {"response": format_email_draft(updated_draft), "draft": updated_draft}
+
+    if is_send_request(message):
+        gmail_account = get_gmail_account(engine, user_id)
+        if not gmail_account:
+            return {"response": "No Gmail account is connected. Connect Gmail and try again."}
+
+        try:
+            draft = prepare_draft(
+                message=message,
+                sender_email=gmail_account[1],
+                sender_name=request.session.get("name", ""),
+            )
+        except ValueError as error:
+            return {"response": str(error)}
+
+        draft["user_id"] = str(user_id)
+        request.session["pending_email_draft"] = draft
+        return {"response": format_email_draft(draft), "draft": draft}
+
+    try:
+        response = await run_assistant_message(request, user_id, message)
+    except Exception as error:
+        print(f"Assistant request failed for user_id={user_id}: {error}")
+        response = "I couldn't process that request right now. Please try again."
+
+    return {"response": response}
 
 
 # =========================================================

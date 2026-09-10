@@ -1,4 +1,6 @@
-const API_BASE_URL = "http://localhost:8007";
+const API_BASE_URL = ["localhost", "127.0.0.1"].includes(window.location.hostname)
+    ? "http://localhost:8007"
+    : "https://inboxai.fastapicloud.dev";
 let isAuthenticated = false;
 
 const getHeaders = (extraHeaders = {}) => ({
@@ -369,15 +371,19 @@ chatForm.addEventListener("submit", async e => {
         const response = await fetch(`${API_BASE_URL}/analyze`, {
             method: "POST",
             headers: getHeaders(),
+            credentials: "include",
             body: JSON.stringify({
                 message: value
             })
         });
 
-        const data = await response.json();
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(data.detail || "The assistant could not process your message.");
+        }
 
         removeThinkingIndicator();
-        addMessage(data.response, "ai");
+        addMessage(data.response || "The assistant returned an empty response.", "ai");
 
         if (typeof getAllTasks === "function") getAllTasks();
         if (typeof pendingTasksCount === "function") pendingTasksCount();

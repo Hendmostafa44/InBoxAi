@@ -6,6 +6,7 @@ from tools.tools import (
     get_current_datetime,
     create_task
 )
+from send_mail_agent.agent import send_mail_agent
 
 
 # ==========================================
@@ -199,11 +200,16 @@ Rules:
 
 6. Keep casual responses concise.
 
+7. If the user asks to send an email, route the request to send_mail_agent.
+    The send_mail_agent prepares a draft only. Never imply that an email was sent
+    without explicit confirmation handled by the backend.
+
 Your main responsibility is routing.
 """,
 
     sub_agents=[
-        email_workflow
+        email_workflow,
+        send_mail_agent
     ]
 )
 
