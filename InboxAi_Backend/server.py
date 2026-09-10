@@ -18,9 +18,6 @@ from agents.agent import root_agent
 from send_mail_agent.agent import (
     is_cancellation,
     is_confirmation,
-    is_send_request,
-    modify_draft,
-    prepare_draft,
 )
 from send_mail_agent.gmail import get_gmail_account, send_email
 
@@ -804,7 +801,15 @@ async def run_assistant_message(request: Request, user_id: int, message: str) ->
     assistant_user_id = f"inboxai_user_{user_id}"
     session_id = request.session.get("adk_session_id")
 
-    if not session_id:
+    session = None
+    if session_id:
+        session = await session_service.get_session(
+            app_name="InboxAI",
+            user_id=assistant_user_id,
+            session_id=session_id,
+        )
+
+    if not session:
         session_id = str(uuid.uuid4())
         await session_service.create_session(
             app_name="InboxAI",
@@ -825,19 +830,99 @@ async def run_assistant_message(request: Request, user_id: int, message: str) ->
         new_message=content,
     ):
         if event.is_final_response() and event.content and event.content.parts:
-            final_response = event.content.parts[0].text or ""
+            final_response = "\n".join(
+                part.text
+                for part in event.content.parts
+                if part.text
+            )
 
     return final_response or "I could not generate a response. Please try again."
 
 
-def format_email_draft(draft: dict[str, str]) -> str:
-    return (
-        "Here is the email I prepared:\n\n"
-        f"To: {draft['recipient']}\n"
-        f"Subject: {draft['subject']}\n\n"
-        f"{draft['body']}\n\n"
-        "Would you like me to send it?"
-    )
+def build_agent_message(message: str, pending_draft: dict | None) -> str:
+    if not pending_draft:
+        return message
+
+    return f"""
+CURRENT_DRAFT
+{json.dumps(pending_draft, ensure_ascii=False)}
+
+USER_MESSAGE
+{message}
+""".strip()
+
+
+def extract_agent_draft_response(
+    model_response: str,
+    original_draft: dict | None,
+    sender_name: str,
+) -> tuple[str, dict[str, str]] | None:
+    result = extract_json_object(model_response)
+    if isinstance(result, dict):
+        draft = result.get("draft") or result
+        response = result.get("response")
+        if (
+            isinstance(response, str)
+            and (
+                not isinstance(draft, dict)
+                or not {"recipient", "subject", "body"}.issubset(draft)
+            )
+        ):
+            result = None
+            model_response = response
+    else:
+        draft = None
+        response = None
+
+    if not isinstance(result, dict):
+        plain_text = str(model_response).strip()
+        recipient_match = re.search(
+            r"\bTo:\s*([^\s,;<>]+@[^\s,;<>]+)",
+            plain_text,
+            flags=re.IGNORECASE,
+        )
+        subject_match = re.search(
+            r"\bSubject:\s*(.*?)(?=\s+Body:|\n|$)",
+            plain_text,
+            flags=re.IGNORECASE,
+        )
+        body_match = re.search(
+            r"\bBody:\s*(.*?)(?=\s+(?:Would you like|Should I|Would you prefer)|$)",
+            plain_text,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if not recipient_match or not subject_match or not body_match:
+            return None
+
+        draft = {
+            "recipient": recipient_match.group(1).rstrip(".,"),
+            "subject": subject_match.group(1).strip(),
+            "body": body_match.group(1).strip(),
+        }
+        response = plain_text
+
+    if not isinstance(draft, dict):
+        return None
+    if not isinstance(response, str):
+        response = "Here is the email draft I prepared. Would you like me to send it?"
+
+    required_fields = {"recipient", "subject", "body"}
+    if not required_fields.issubset(draft):
+        return None
+    if not all(isinstance(draft[field], str) for field in required_fields):
+        return None
+    if not draft["recipient"].strip() or not draft["subject"].strip() or not draft["body"].strip():
+        return None
+
+    if original_draft:
+        draft["recipient"] = original_draft["recipient"]
+        draft["sender"] = original_draft.get("sender", "")
+        draft["sender_name"] = original_draft.get("sender_name", sender_name)
+    else:
+        draft["sender"] = draft.get("sender", "")
+        draft["sender_name"] = draft.get("sender_name", sender_name)
+
+    return response, draft
 
 
 @app.post("/analyze")
@@ -872,35 +957,35 @@ async def analyze_message(request: Request):
             request.session.pop("pending_email_draft", None)
             return {"response": "Okay, I cancelled the email."}
 
-        updated_draft = modify_draft(pending_draft, message)
-        request.session["pending_email_draft"] = updated_draft
-        return {"response": format_email_draft(updated_draft), "draft": updated_draft}
-
-    if is_send_request(message):
-        gmail_account = get_gmail_account(engine, user_id)
-        if not gmail_account:
-            return {"response": "No Gmail account is connected. Connect Gmail and try again."}
-
-        try:
-            draft = prepare_draft(
-                message=message,
-                sender_email=gmail_account[1],
-                sender_name=request.session.get("name", ""),
-            )
-        except ValueError as error:
-            return {"response": str(error)}
-
-        draft["user_id"] = str(user_id)
-        request.session["pending_email_draft"] = draft
-        return {"response": format_email_draft(draft), "draft": draft}
-
     try:
-        response = await run_assistant_message(request, user_id, message)
+        agent_response = await run_assistant_message(
+            request,
+            user_id,
+            build_agent_message(message, pending_draft),
+        )
     except Exception as error:
         print(f"Assistant request failed for user_id={user_id}: {error}")
-        response = "I couldn't process that request right now. Please try again."
+        return {"response": "I couldn't process that request right now. Please try again."}
 
-    return {"response": response}
+    draft_result = extract_agent_draft_response(
+        model_response=agent_response,
+        original_draft=pending_draft,
+        sender_name=request.session.get("name", ""),
+    )
+    if draft_result:
+        response, draft = draft_result
+        gmail_account = get_gmail_account(engine, user_id)
+        if gmail_account:
+            draft["sender"] = gmail_account[1]
+        draft["sender_name"] = (
+            pending_draft.get("sender_name", request.session.get("name", ""))
+            if pending_draft
+            else request.session.get("name", "")
+        )
+        request.session["pending_email_draft"] = draft
+        return {"response": response, "draft": draft}
+
+    return {"response": agent_response}
 
 
 # =========================================================

@@ -204,6 +204,9 @@ Rules:
     The send_mail_agent prepares a draft only. Never imply that an email was sent
     without explicit confirmation handled by the backend.
 
+8. If the user asks to modify CURRENT_DRAFT, route it to send_mail_agent and
+    preserve all draft facts. Do not route it to email_workflow.
+
 Your main responsibility is routing.
 """,
 
