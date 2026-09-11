@@ -118,7 +118,7 @@
       </section>
 
       <section id="tasks" class="page">
-        <div class="page-heading compact"><div><p class="eyebrow">ACTION ITEMS</p><h1>Tasks</h1><p class="muted">Tasks automatically extracted from your emails.</p></div><button class="primary-btn" id="openNewTaskModal">＋ New task</button></div>
+        <div class="page-heading compact"><div><p class="eyebrow">ACTION ITEMS</p><h1>Tasks</h1><p class="muted">Tasks automatically extracted from your emails.</p></div></div>
         <div class="task-columns">
           <div class="panel">
               <div class="panel-head">
@@ -167,38 +167,6 @@
       </section> -->
     </main>
   </div>
-
-  <div id="newTaskModal" class="modal-overlay">
-    <div class="modal-card">
-      <div class="modal-header">
-        <h2>✦ Create New Task</h2>
-        <button type="button" class="close-modal-btn" id="closeNewTaskModal">✕</button>
-      </div>
-      <form id="newTaskForm" class="modal-form">
-        <div class="form-group">
-          <label for="taskTitleInput">Task Description</label>
-          <input type="text" id="taskTitleInput" placeholder="e.g. Reply to Google Careers email" required>
-        </div>
-        <div class="form-group">
-          <label for="taskDeadlineInput">Deadline</label>
-          <input type="text" id="taskDeadlineInput" placeholder="e.g. Tomorrow 5 PM or Aug 20" required>
-        </div>
-        <div class="form-group">
-          <label for="taskPriorityInput">Priority</label>
-          <select id="taskPriorityInput">
-            <option value="High">High Priority</option>
-            <option value="Medium" selected>Medium Priority</option>
-            <option value="Low">Low Priority</option>
-          </select>
-        </div>
-        <div class="modal-actions">
-          <button type="button" class="secondary-btn" id="cancelNewTaskModal">Cancel</button>
-          <button type="submit" class="primary-btn">Save Task</button>
-        </div>
-      </form>
-    </div>
-  </div>
-
   <script src="script.js"></script>
 </body>
 </html>

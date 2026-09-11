@@ -23,6 +23,7 @@ from send_mail_agent.gmail import get_gmail_account, send_email
 
 from dotenv import load_dotenv
 
+import asyncio
 import os
 import json
 import uuid
@@ -797,6 +798,18 @@ Body:
     }
 
 
+async def analyze_new_emails(email_ids: list[int], user_id: int):
+    for email_id in email_ids:
+        try:
+            print(f"[analysis] Background analysis started for email_id={email_id}")
+            await analyze_email_by_id(
+                email_id=email_id,
+                user_id=user_id,
+            )
+        except Exception as error:
+            print(f"Background analysis failed for email {email_id}: {error}")
+
+
 async def run_assistant_message(request: Request, user_id: int, message: str) -> str:
     assistant_user_id = f"inboxai_user_{user_id}"
     session_id = request.session.get("adk_session_id")
@@ -1226,6 +1239,7 @@ async def get_gmail_emails(
         .messages()
         .list(
             userId="me",
+            labelIds=["INBOX"],
             maxResults=10
         )
         .execute()
@@ -1238,6 +1252,7 @@ async def get_gmail_emails(
     print(f"[/gmail/emails] Gmail returned {len(messages)} messages")
 
     saved_emails = []
+    new_email_ids = []
     inserted_count = 0
 
     # =====================================================
@@ -1407,30 +1422,8 @@ async def get_gmail_emails(
                 continue
 
             email_id = inserted_email[0]
+            new_email_ids.append(email_id)
             inserted_count += 1
-
-        # =================================================
-        # STEP 2
-        # ANALYZE SAME EMAIL
-        # =================================================
-
-        try:
-
-            print(f"[/gmail/emails] Analyzing email_id={email_id}")
-
-            analysis = await analyze_email_by_id(
-                email_id=email_id,
-                user_id=user_id
-            )
-
-        except Exception as e:
-
-            print(
-                f"Analysis failed for email "
-                f"{email_id}: {e}"
-            )
-
-            analysis = None
 
         # -----------------------------------------
         # Response
@@ -1441,8 +1434,8 @@ async def get_gmail_emails(
             "gmail_message_id": message_id,
             "sender": sender,
             "subject": subject,
-            "status": "saved_and_analyzed",
-            "analysis": analysis
+            "status": "saved",
+            "analysis": None
         })
 
     # -----------------------------------------
@@ -1453,6 +1446,14 @@ async def get_gmail_emails(
         gmail_account_id,
         credentials
     )
+
+    if new_email_ids:
+        asyncio.create_task(
+            analyze_new_emails(
+                email_ids=new_email_ids,
+                user_id=user_id,
+            )
+        )
 
     print(f"[/gmail/emails] Inserted {inserted_count} new emails")
 

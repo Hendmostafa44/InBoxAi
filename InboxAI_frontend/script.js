@@ -2,6 +2,7 @@ const API_BASE_URL = ["localhost", "127.0.0.1"].includes(window.location.hostnam
     ? "http://localhost:8007"
     : "https://inboxai.fastapicloud.dev";
 let isAuthenticated = false;
+let gmailSyncPromise = null;
 
 const getHeaders = (extraHeaders = {}) => ({
     "Content-Type": "application/json",
@@ -18,6 +19,18 @@ async function getUserEmails() {
 
     const data = await response.json();
     return Array.isArray(data) ? data : (data.emails || []);
+}
+
+function syncGmailEmails() {
+    if (!gmailSyncPromise) {
+        gmailSyncPromise = fetch(`${API_BASE_URL}/gmail/emails`, {
+            credentials: "include"
+        }).finally(() => {
+            gmailSyncPromise = null;
+        });
+    }
+
+    return gmailSyncPromise;
 }
 
 // Load authenticated user from server session
@@ -244,9 +257,7 @@ async function loadInboxEmails() {
     if (isLoggedIn) {
         setLoggedInState();
         try {
-            const syncResponse = await fetch(`${API_BASE_URL}/gmail/emails`, {
-                credentials: "include"
-            });
+            const syncResponse = await syncGmailEmails();
             if (!syncResponse.ok) {
                 throw new Error(`Gmail sync failed: ${syncResponse.status}`);
             }
@@ -674,7 +685,7 @@ async function getDeadlines() {
         deadlineGrid.innerHTML = "";
 
         if (validTasks.length === 0) {
-            deadlineGrid.innerHTML = `<div class="empty-deadlines">✦ No upcoming deadlines detected. Add a new task or analyze an email to extract deadlines!</div>`;
+            deadlineGrid.innerHTML = `<div class="empty-deadlines">✦ No upcoming deadlines detected. Analyze an email to extract deadlines!</div>`;
             return;
         }
 
@@ -698,46 +709,6 @@ async function getDeadlines() {
     } catch (err) {
         console.warn("Deadlines fetch error:", err);
     }
-}
-
-// New Task Modal Logic
-const newTaskModal = document.getElementById("newTaskModal");
-const openNewTaskBtn = document.getElementById("openNewTaskModal");
-const closeNewTaskBtn = document.getElementById("closeNewTaskModal");
-const cancelNewTaskBtn = document.getElementById("cancelNewTaskModal");
-const newTaskForm = document.getElementById("newTaskForm");
-
-function toggleModal(show) {
-    if (newTaskModal) {
-        newTaskModal.classList.toggle("active", show);
-    }
-}
-
-if (openNewTaskBtn) openNewTaskBtn.addEventListener("click", () => toggleModal(true));
-if (closeNewTaskBtn) closeNewTaskBtn.addEventListener("click", () => toggleModal(false));
-if (cancelNewTaskBtn) cancelNewTaskBtn.addEventListener("click", () => toggleModal(false));
-
-if (newTaskModal) {
-    newTaskModal.addEventListener("click", (e) => {
-        if (e.target === newTaskModal) toggleModal(false);
-    });
-}
-
-if (newTaskForm) {
-    newTaskForm.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const taskTitle = document.getElementById("taskTitleInput").value.trim();
-        const taskDeadline = document.getElementById("taskDeadlineInput").value.trim();
-        const taskPriority = document.getElementById("taskPriorityInput").value;
-
-        if (!taskTitle || !taskDeadline) return;
-
-        console.warn(
-            "Manual tasks are not persisted. Tasks are extracted from analyzed emails."
-        );
-        newTaskForm.reset();
-        toggleModal(false);
-    });
 }
 
 const urgentCountEl = document.getElementById("urgent-emails");
