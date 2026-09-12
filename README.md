@@ -142,48 +142,6 @@ InboxAI/
 - Google OAuth credentials with the configured Gmail scopes
 - Google ADK/Gemini configuration
 
-### Install dependencies
-
-```bash
-git clone https://github.com/Hendmostafa44/InBoxAi.git
-cd InBoxAi/InboxAi_Backend
-python -m venv .venv
-```
-
-On Windows:
-
-```powershell
-.venv\Scripts\Activate.ps1
-```
-
-Install backend dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
-### Configure environment variables
-
-Configure the backend environment with the required Google OAuth, session, and Supabase database values. Keep credentials in `.env` files that are excluded from version control.
-
-Typical values include:
-
-```env
-GOOGLE_CLIENT_ID=your_google_client_id
-GOOGLE_CLIENT_SECRET=your_google_client_secret
-GOOGLE_API_KEY=your_google_api_key
-GOOGLE_REDIRECT_URI=http://localhost:8007/auth/google/callback
-FRONTEND_URL=http://localhost:5500/InboxAI_frontend/index.html
-SESSION_SECRET_KEY=replace_with_a_secure_random_value
-SUPABASE_DB_USER=your_database_user
-SUPABASE_DB_PASSWORD=your_database_password
-SUPABASE_DB_HOST=your_database_host
-SUPABASE_DB_PORT=5432
-SUPABASE_DB_NAME=your_database_name
-```
-
-Never commit OAuth secrets, API keys, database passwords, or session secrets.
-
 ### Run the backend
 
 From `InboxAi_Backend`:
