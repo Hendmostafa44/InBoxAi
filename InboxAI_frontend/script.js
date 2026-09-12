@@ -331,7 +331,7 @@ function addMessage(text, type) {
   row.className = `message ${type}`;
   const formattedText = text ? text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') : '';
   row.innerHTML = type === "ai"
-    ? `<div class="chat-avatar">✦</div><div><span class="message-name">InboxAI</span><div class="bubble">${formattedText}</div></div>`
+    ? `<div class="chat-avatar">✦</div><div><span class="message-name">MailPilot</span><div class="bubble">${formattedText}</div></div>`
     : `<div><div class="bubble">${formattedText}</div></div>`;
   chatMessages.appendChild(row);
   chatMessages.scrollTop = chatMessages.scrollHeight;
@@ -362,9 +362,9 @@ function addThinkingIndicator() {
     row.innerHTML = `
         <div class="chat-avatar">✦</div>
         <div>
-            <span class="message-name">InboxAI</span>
+            <span class="message-name">MailPilot</span>
             <div class="bubble">
-                <span>InboxAI is thinking</span>
+                <span>MailPilot is thinking</span>
                 <div class="thinking-dots">
                     <div class="thinking-dot"></div>
                     <div class="thinking-dot"></div>
