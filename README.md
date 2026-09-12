@@ -1,528 +1,220 @@
-# 📧 InboxAI — Intelligent Email Management with AI Agents
+# InboxAI
 
-## 📌 Overview
+InboxAI is an AI-powered email workspace that turns an incoming Gmail inbox into clear summaries, prioritized action items, and deadlines. It combines Google OAuth, Gmail synchronization, PostgreSQL storage, FastAPI services, and Google ADK agents in one focused workflow.
 
-**InboxAI** is an AI-powered email management system designed to help users understand and organize their emails automatically.
+## Why InboxAI?
 
-Instead of manually reading every email and deciding what needs to be done, InboxAI uses **Generative AI and multiple specialized AI agents** to analyze emails, identify important information, determine priority, and extract actionable tasks.
+Important email information is easy to miss when messages are scattered across a busy inbox. A user may need to identify the purpose of a message, decide its urgency, remember a deadline, create a task, and write a reply before taking action.
 
-The main goal of the project is to demonstrate how **Agentic AI** can be used to automate a real-world workflow.
+InboxAI reduces that manual work by analyzing incoming messages and presenting the information that requires attention in a structured dashboard.
 
----
+## Main Features
 
-## 🎯 Problem
+- **Google authentication** with session-based login and Gmail account connection.
+- **Inbox synchronization** that imports up to 10 messages labeled `INBOX` from the connected Gmail account.
+- **Duplicate protection** using the Gmail account and Gmail message ID.
+- **AI email analysis** that extracts:
+  - A concise summary
+  - An actionable task, when one exists
+  - A normalized deadline
+  - A priority level: High, Medium, or Low
+- **Task management** for tasks extracted from analyzed emails, including pending/completed status and soft deletion.
+- **Deadline tracking** that groups extracted deadlines by priority.
+- **AI Assistant** for questions about the inbox and email-related requests.
+- **Safe email drafting** with explicit confirmation before an email is sent through Gmail.
+- **Responsive frontend** with dashboard, inbox, tasks, deadlines, and assistant views.
 
-People receive many emails every day, and important information can easily be missed.
+## Architecture
 
-For example, an email may contain:
-
-* An important task
-* A deadline
-* An urgent request
-* Information that requires a response
-* A low-priority notification
-
-Normally, the user has to read the email, understand its meaning, decide how important it is, and manually create a task.
-
-**InboxAI automates this process.**
-
----
-
-# 💡 Solution
-
-InboxAI processes an email through a workflow of specialized AI agents.
-
-The system can:
-
-1. Understand the email.
-2. Generate a short summary.
-3. Identify whether the email requires an action.
-4. Determine its priority.
-5. Extract the task.
-6. Extract the deadline.
-7. Store the resulting analysis on the same SQL email row.
-8. Return the structured information to the user.
-
-The system is designed as an **Agentic AI workflow**, where each agent has a specific responsibility.
-
----
-
-# 🏗️ System Architecture
-
-```text
-                     ┌───────────────────┐
-                     │       Email       │
-                     └─────────┬─────────┘
-                               │
-                               ▼
-                    ┌─────────────────────┐
-                    │    Orchestrator     │
-                    │        Agent        │
-                    └──────────┬──────────┘
-                               │
-             ┌─────────────────┼─────────────────┐
-             │                 │                 │
-             ▼                 ▼                 ▼
-      ┌─────────────┐   ┌─────────────┐   ┌─────────────┐
-      │    Email    │   │  Priority   │   │    Task     │
-      │ Understanding│   │    Agent    │   │    Agent    │
-      │    Agent    │   │             │   │             │
-      └──────┬──────┘   └──────┬──────┘   └──────┬──────┘
-             │                 │                 │
-             └─────────────────┼─────────────────┘
-                               │
-                               ▼
-                     ┌──────────────────┐
-                     │     FastAPI      │
-                     │      Backend     │
-                     └────────┬─────────┘
-                              │
-                              ▼
-                     ┌──────────────────┐
-                     │   SQL Database   │
-                     │ Users, Gmail,   │
-                     │ Emails, Analysis│
-                     └──────────────────┘
+```mermaid
+flowchart TD
+    User[User] --> Frontend[Static HTML/CSS/JavaScript frontend]
+    Frontend -->|Session requests| API[FastAPI backend]
+    API -->|Google OAuth| Google[Google OAuth]
+    API -->|Fetch INBOX messages| Gmail[Gmail API]
+    API --> Database[(Supabase PostgreSQL)]
+    API --> Agents[Google ADK agent workflow]
+    Agents --> Analysis[Summary, task, deadline, priority]
+    Analysis --> Database
+    API -->|Confirmed send only| Gmail
 ```
 
----
+### Backend
 
-# 🤖 AI Agents
+The backend is a FastAPI application in `InboxAi_Backend/server.py`. It handles authentication, session validation, Gmail synchronization, email retrieval, task status changes, soft deletion, AI assistant requests, and confirmed email sending.
 
-## 1. Email Understanding Agent
+Database access is provided through SQLAlchemy in `InboxAi_Backend/database.py`. Records are isolated by the authenticated user's Gmail account.
 
-The first agent is responsible for understanding the content of the email.
+### AI workflow
 
-It analyzes:
+The Google ADK workflow in `InboxAi_Backend/agents/agent.py` contains:
 
-* The main purpose of the email
-* Important information
-* Required actions
-* Possible deadlines
+1. An email-understanding agent that extracts summary, task, and deadline.
+2. A priority agent that assigns High, Medium, or Low priority.
+3. An email workflow that sequences the analysis agents.
+4. An orchestrator that routes email-management requests and assistant conversations.
+5. A send-mail agent that prepares drafts without sending them directly.
 
-It then produces a structured analysis that can be used by the other agents.
+Email analysis is saved on the corresponding email record using the existing fields `summary`, `task`, `deadline`, and `priority`.
 
-### Example
+## Email Workflow
 
-Input:
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant F as Frontend
+    participant A as FastAPI
+    participant G as Gmail API
+    participant D as PostgreSQL
+    participant AI as ADK agents
 
-```text
-Subject: AI Project Report
+    U->>F: Sign in with Google
+    F->>A: OAuth login
+    A->>G: Authorize Gmail access
+    G-->>A: User identity and tokens
+    A->>D: Create or update user and Gmail account
+    A-->>F: Authenticated session
 
-Please submit the final AI project report by August 16.
-Make sure to include the project documentation and GitHub link.
+    F->>A: Request Gmail sync
+    A->>G: List up to 10 INBOX messages
+    G-->>A: Gmail message IDs
+    A->>G: Fetch new message details
+    A->>D: Save new incoming emails
+    A-->>F: Return saved email list
+    A--)AI: Analyze newly saved emails in background
+    AI->>D: Update summary, task, deadline, and priority
+
+    U->>F: Request an email draft
+    F->>A: Send assistant message
+    A->>AI: Generate draft
+    AI-->>A: Recipient, subject, and body
+    A-->>F: Show draft and request confirmation
+    U->>F: Confirm sending
+    F->>A: Confirm draft
+    A->>G: Send through Gmail API
 ```
 
-The agent understands that the email contains an actionable request with a deadline.
+New Gmail messages are saved before AI analysis completes, allowing the frontend to display the inbox sooner. Background analysis still updates the existing analysis fields after the sync response is returned.
 
----
-
-## 2. Priority Agent
-
-The priority agent determines how important the email is.
-
-It classifies emails into:
-
-```text
-HIGH
-MEDIUM
-LOW
-```
-
-For example, an email containing:
-
-```text
-"Please submit the report by tomorrow."
-```
-
-would most likely be classified as:
-
-```text
-HIGH
-```
-
-The agent considers the urgency and context of the email when determining its priority.
-
----
-
-## 3. Task Extraction Agent
-
-The task agent converts the actionable information from the email into a structured task.
-
-For example:
-
-```json
-{
-    "task": "Submit the AI project report",
-    "deadline": "2026-08-16",
-    "priority": "High"
-}
-```
-
-This makes the information easier for the backend and frontend to process.
-
----
-
-## 4. Orchestrator Agent
-
-The **Orchestrator** coordinates the complete workflow.
-
-Instead of the user interacting with every agent separately, the orchestrator manages the sequence of operations.
-
-The workflow is approximately:
-
-```text
-Email
-  ↓
-Orchestrator
-  ↓
-Email Understanding
-  ↓
-Priority Detection
-  ↓
-Task Extraction
-  ↓
-Update Email Analysis in SQL
-```
-
-This architecture makes it possible to add additional agents in the future without redesigning the entire application.
-
----
-
-# 🔄 Complete Example
-
-### Input Email
-
-```text
-Subject: AI Project Report Submission
-
-Hi,
-
-Please submit the final AI project report by August 16.
-
-The report should contain the project documentation
-and the GitHub repository link.
-
-Best regards
-```
-
-### Step 1 — Understanding
-
-The AI identifies:
-
-```text
-Purpose:
-Submit an AI project report.
-
-Action required:
-Yes.
-
-Deadline:
-August 16.
-```
-
-### Step 2 — Priority
-
-The priority agent determines:
-
-```text
-Priority: HIGH
-```
-
-because the email contains a specific submission deadline.
-
-### Step 3 — Task Extraction
-
-The task agent generates:
-
-```json
-{
-    "task": "Submit the AI project report",
-    "deadline": "2026-08-16",
-    "priority": "High"
-}
-```
-
-### Step 4 — Backend
-
-The structured task is sent to the backend through an API.
-
-```text
-AI Agents
-  ↓
-FastAPI
-  ↓
-SQL Database
-```
-
-### Final Result
-
-```text
-┌────────────────────────────────────┐
-│ 🔴 HIGH PRIORITY                   │
-│                                    │
-│ Submit the AI project report       │
-│                                    │
-│ Deadline: August 16, 2026          │
-└────────────────────────────────────┘
-```
-
----
-
-# 🧠 Why Multiple Agents?
-
-A single LLM could perform the entire task, but InboxAI uses specialized agents to separate responsibilities.
-
-For example:
-
-```text
-Email Agent
-     ↓
-"What does this email mean?"
-
-Priority Agent
-     ↓
-"How important is it?"
-
-Task Agent
-     ↓
-"What should the user do?"
-
-Orchestrator
-     ↓
-"How should the complete workflow run?"
-```
-
-This approach makes the application easier to:
-
-* Maintain
-* Debug
-* Extend
-* Test
-* Improve
-
-New agents can also be added later for features such as sentiment analysis, email categorization, automatic replies, or calendar integration.
-
----
-
-# 🛠️ Technologies Used
-
-## Generative AI & Agentic AI
-
-* **Python**
-* **Google ADK**
-* **LangChain**
-* **Google Gemini**
-* **Groq**
-* **LLMs**
-* **Prompt Engineering**
-* **AI Agents**
-* **Multi-Agent Systems**
-* **Tool / Function Calling**
-* **Structured Outputs**
-* **Pydantic**
-
-## Backend
-
-* **FastAPI**
-* **REST APIs**
-* **Requests**
-
-## Database / Storage
-
-* **PostgreSQL / Supabase**
-
-## Development
-
-* **Git**
-* **GitHub**
-* **VS Code**
-* **Environment Variables / `.env`**
-
----
-
-# 📂 Project Structure
+## Project Structure
 
 ```text
 InboxAI/
-│
-├── agents/
-│   ├── understand_mails.py
-│   ├── priority_agent.py
-│   ├── task_from_mails.py
-│   └── orchestrator.py
-│
-├── backend/
-│   └── server.py
-│
-├── frontend/
+├── InboxAi_Backend/
+│   ├── server.py                  # FastAPI application and routes
+│   ├── database.py                # SQLAlchemy/PostgreSQL connection
+│   ├── agents/agent.py            # Google ADK analysis workflow
+│   ├── send_mail_agent/           # Drafting and Gmail delivery
+│   ├── tools/tools.py             # ADK tools
+│   ├── migrations/                # SQL migrations
+│   ├── pyproject.toml
+│   └── requirements.txt
+├── InboxAI_frontend/
 │   ├── index.html
-│   ├── style.css
-│   └── script.js
-│
-├── .env
+│   ├── script.js
+│   └── style.css
 ├── requirements.txt
 └── README.md
 ```
 
----
+## API Surface
 
-# 🔌 Backend Communication
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /auth/google/login` | Start Google OAuth |
+| `GET /auth/google/callback` | Complete OAuth and create the application session |
+| `GET /auth/me` | Return the current authenticated user |
+| `POST /auth/logout` | Clear the current session |
+| `GET /gmail/emails` | Sync up to 10 incoming `INBOX` messages |
+| `GET /emails` | Return the user's non-deleted emails |
+| `POST /emails/{email_id}/analyze` | Analyze and save an existing email |
+| `PATCH /emails/{email_id}/status` | Mark an email task as `Pending` or `Completed` |
+| `DELETE /tasks/{task_id}` | Soft-delete an email from InboxAI |
+| `POST /analyze` | Use the AI Assistant and manage confirmed email drafts |
+| `GET /` | Backend health response |
 
-The AI agents communicate with the backend through APIs.
+## Local Setup
 
-Email analysis is saved through the shared email-analysis endpoint:
+### Requirements
 
-```http
-POST /emails/{email_id}/analyze
-```
+- Python 3.12 or newer
+- A PostgreSQL-compatible Supabase database
+- Google OAuth credentials with the configured Gmail scopes
+- Google ADK/Gemini configuration
 
-with structured data such as:
-
-```json
-{
-    "task": "Submit the AI project report",
-    "deadline": "2026-08-16",
-    "priority": "High"
-}
-```
-
-The backend then updates the same email row in SQL.
-
-```text
-Gmail Email
-  ↓
-SQL Base Email
-  ↓
-FastAPI Analysis Endpoint
-  ↓
-SQL Analysis Fields
-```
-
-This separation between the **AI layer** and **backend layer** makes the architecture cleaner and easier to maintain.
-
----
-
-# ⚙️ Installation
-
-## 1. Clone the repository
+### Install dependencies
 
 ```bash
 git clone https://github.com/Hendmostafa44/InBoxAi.git
-cd InBoxAi
-```
-
-## 2. Create a virtual environment
-
-```bash
+cd InBoxAi/InboxAi_Backend
 python -m venv .venv
 ```
 
-Activate it on Windows:
+On Windows:
 
-```bash
-.venv\Scripts\activate
+```powershell
+.venv\Scripts\Activate.ps1
 ```
 
-## 3. Install dependencies
+Install backend dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## 4. Configure environment variables
+### Configure environment variables
 
-Create a `.env` file:
+Configure the backend environment with the required Google OAuth, session, and Supabase database values. Keep credentials in `.env` files that are excluded from version control.
+
+Typical values include:
 
 ```env
+GOOGLE_CLIENT_ID=your_google_client_id
+GOOGLE_CLIENT_SECRET=your_google_client_secret
 GOOGLE_API_KEY=your_google_api_key
-GROQ_API_KEY=your_groq_api_key
-
+GOOGLE_REDIRECT_URI=http://localhost:8007/auth/google/callback
+FRONTEND_URL=http://localhost:5500/InboxAI_frontend/index.html
+SESSION_SECRET_KEY=replace_with_a_secure_random_value
+SUPABASE_DB_USER=your_database_user
+SUPABASE_DB_PASSWORD=your_database_password
+SUPABASE_DB_HOST=your_database_host
+SUPABASE_DB_PORT=5432
+SUPABASE_DB_NAME=your_database_name
 ```
 
-**Do not upload `.env` or API keys to GitHub.**
+Never commit OAuth secrets, API keys, database passwords, or session secrets.
 
----
+### Run the backend
 
-# ▶️ Running the Backend
-
-Start the FastAPI server:
+From `InboxAi_Backend`:
 
 ```bash
-uvicorn server:app --reload --port 8007
+uvicorn server:app --reload --host 0.0.0.0 --port 8007
 ```
 
-The backend will then be available locally.
+### Serve the frontend
 
-The frontend communicates with the FastAPI backend to send and retrieve information.
+From the repository root, serve the static frontend with VS Code Live Server or:
 
----
-
-# 🔐 Security
-
-API keys and database credentials are stored using environment variables.
-
-The `.env` file should be added to `.gitignore`:
-
-```text
-.env
-.venv/
-__pycache__/
+```bash
+python -m http.server 5500 --directory InboxAI_frontend
 ```
 
----
+Open `http://localhost:5500/index.html` when using that command, or use the URL provided by your static server.
 
-# 🚀 Future Improvements
+## Security and Data Isolation
 
-The project can be extended with:
+- Google OAuth state and PKCE verification protect the OAuth callback flow.
+- Session authentication is required for user data endpoints.
+- Email reads, analysis, task status changes, and soft deletion are scoped to the authenticated user's Gmail account.
+- Email sending requires an explicit confirmation message after a draft is shown.
+- SQL statements use bound parameters.
+- Secrets must be supplied through environment variables and must not be committed.
 
-* Gmail integration
-* Outlook integration
-* Automatic email fetching
-* Automatic reminders
-* Calendar integration
-* User authentication
-* Email embeddings
-* Semantic search
-* RAG
-* Email classification
-* Automatic email replies
-* Task dashboard
-* Cloud deployment
+## Current Scope
 
----
+InboxAI currently focuses on incoming Gmail messages and tasks extracted from those messages. Manual task creation is not included. The repository does not currently include automated tests or CI configuration, so production deployments should add focused coverage for OAuth, user isolation, Gmail synchronization, AI response parsing, and email-send confirmation.
 
-# 📚 What This Project Demonstrates
+## License
 
-InboxAI demonstrates practical experience in **Generative AI and AI Engineering**, including:
-
-* Designing AI agent workflows
-* Building multi-agent systems
-* Integrating LLMs into applications
-* Using Google ADK and LangChain
-* Working with structured LLM outputs
-* Implementing tool/function calling
-* Building REST APIs with FastAPI
-* Connecting AI applications to databases
-* Managing communication between AI agents and backend services
-* Developing an end-to-end AI application
-
----
-
-# 👩‍💻 Author
-
-**Hend Mostafa**
-
-Computer & AI Student
-
-GitHub:
-https://github.com/Hendmostafa44/InBoxAi
-
----
-
-## ⭐ Conclusion
-
-InboxAI is more than an email summarization tool. It is an **Agentic AI application** that demonstrates how multiple specialized AI agents can collaborate to transform unstructured email content into useful, structured tasks.
-
-The project combines **Generative AI, AI Agents, backend APIs, and database storage** into one end-to-end application.
-
+No license file is currently included in the repository.

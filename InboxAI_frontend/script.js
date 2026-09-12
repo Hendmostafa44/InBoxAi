@@ -1,16 +1,29 @@
 const API_BASE_URL = ["localhost", "127.0.0.1"].includes(window.location.hostname)
     ? "http://localhost:8007"
     : "https://inboxai.fastapicloud.dev";
+const TAB_SESSION_STORAGE_KEY = "inboxai-tab-session-id";
+const redirectTabSessionId = new URLSearchParams(window.location.search).get("tab_session_id");
+const tabSessionId = redirectTabSessionId || sessionStorage.getItem(TAB_SESSION_STORAGE_KEY) || crypto.randomUUID();
+sessionStorage.setItem(TAB_SESSION_STORAGE_KEY, tabSessionId);
+if (redirectTabSessionId) {
+    const cleanUrl = new URL(window.location.href);
+    cleanUrl.searchParams.delete("tab_session_id");
+    window.history.replaceState({}, document.title, cleanUrl.toString());
+}
 let isAuthenticated = false;
 let gmailSyncPromise = null;
 
 const getHeaders = (extraHeaders = {}) => ({
     "Content-Type": "application/json",
+    "X-Session-ID": tabSessionId,
     ...extraHeaders
 });
 
 async function getUserEmails() {
+    if (!isAuthenticated) return [];
+
     const response = await fetch(`${API_BASE_URL}/emails`, {
+        headers: getHeaders(),
         credentials: "include"
     });
 
@@ -22,8 +35,11 @@ async function getUserEmails() {
 }
 
 function syncGmailEmails() {
+    if (!isAuthenticated) return Promise.resolve(new Response(null, { status: 401 }));
+
     if (!gmailSyncPromise) {
         gmailSyncPromise = fetch(`${API_BASE_URL}/gmail/emails`, {
+            headers: getHeaders(),
             credentials: "include"
         }).finally(() => {
             gmailSyncPromise = null;
@@ -38,6 +54,7 @@ function syncGmailEmails() {
 async function loadCurrentUser() {
     try {
         const response = await fetch(`${API_BASE_URL}/auth/me`, {
+            headers: getHeaders(),
             credentials: "include"
         });
 
@@ -95,6 +112,8 @@ async function loadCurrentUser() {
 
     } catch (error) {
         console.error("Error loading current user:", error);
+        isAuthenticated = false;
+        setLoggedOutState();
         return null;
     }
 }
@@ -732,7 +751,9 @@ const connectGmailBtn = document.getElementById("connectGmailBtn");
 
 if (connectGmailBtn) {
     connectGmailBtn.addEventListener("click", () => {
-        window.location.href = `${API_BASE_URL}/auth/google/login`;
+        const loginUrl = new URL(`${API_BASE_URL}/auth/google/login`);
+        loginUrl.searchParams.set("tab_session_id", tabSessionId);
+        window.location.href = loginUrl.toString();
     });
 }
 
@@ -744,6 +765,7 @@ async function deleteTask(taskId, taskElement, deleteButton) {
     try {
         const response = await fetch(`${API_BASE_URL}/tasks/${taskId}`, {
             method: "DELETE",
+            headers: getHeaders(),
             credentials: "include"
         });
 
@@ -795,6 +817,7 @@ if (logoutButton) {
         try {
             await fetch(`${API_BASE_URL}/auth/logout`, {
                 method: "POST",
+                headers: getHeaders(),
                 credentials: "include"
             });
         } finally {

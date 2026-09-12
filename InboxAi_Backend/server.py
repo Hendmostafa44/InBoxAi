@@ -1,7 +1,6 @@
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
-from starlette.middleware.sessions import SessionMiddleware
 
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -29,15 +28,18 @@ import json
 import uuid
 import base64
 import re
+from threading import Lock
 from email.utils import parsedate_to_datetime
 from datetime import datetime, timezone
+from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 
 # =========================================================
 # ENV
 # =========================================================
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parent / "agents" / ".env")
 
 
 # =========================================================
@@ -47,19 +49,29 @@ load_dotenv()
 app = FastAPI()
 
 
+def get_allowed_origins() -> list[str]:
+    configured_origins = os.getenv("ALLOWED_ORIGINS")
+    if configured_origins:
+        return [origin.strip().rstrip("/") for origin in configured_origins.split(",") if origin.strip()]
+
+    return [
+        "http://localhost:5500",
+        "http://127.0.0.1:5500",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "https://in-box-ai.vercel.app",
+    ]
+
+
 # =========================================================
-# SESSION
+# TAB SESSIONS
 # =========================================================
 
-app.add_middleware(
-    SessionMiddleware,
-    secret_key=os.getenv(
-        "SESSION_SECRET_KEY",
-        "dev-secret-change-me"
-    ),
-    same_site="lax",
-    https_only=False
-)
+# Authentication state is server-side and keyed by an opaque identifier held
+# in each tab's sessionStorage. It is intentionally not a browser cookie.
+tab_sessions = {}
+oauth_sessions = {}
+session_lock = Lock()
 
 
 # =========================================================
@@ -68,14 +80,10 @@ app.add_middleware(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5500",
-        "http://localhost:3000",
-        "http://localhost:5173",
-    ],
+    allow_origins=get_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["Content-Type", "X-Session-ID"],
 )
 
 
@@ -134,7 +142,8 @@ def require_user_id(request: Request) -> int:
     Get the logged-in user ID from the session.
     """
 
-    user_id = request.session.get("user_id")
+    tab_session = get_tab_session(request)
+    user_id = tab_session.get("user_id") if tab_session else None
 
     if not user_id:
         raise HTTPException(
@@ -143,6 +152,43 @@ def require_user_id(request: Request) -> int:
         )
 
     return user_id
+
+
+def get_tab_session(request: Request, tab_session_id: str | None = None):
+    """Return the server-side session for the current browser tab."""
+
+    tab_session_id = tab_session_id or request.headers.get("X-Session-ID")
+    if not tab_session_id:
+        return None
+
+    try:
+        tab_session_id = str(uuid.UUID(tab_session_id))
+    except (ValueError, AttributeError):
+        return None
+
+    with session_lock:
+        return tab_sessions.get(tab_session_id)
+
+
+def get_or_create_tab_session(tab_session_id: str | None):
+    """Create an empty server-side session for a valid tab identifier."""
+
+    try:
+        normalized_id = str(uuid.UUID(tab_session_id or ""))
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=400, detail="Invalid tab session ID")
+
+    with session_lock:
+        return tab_sessions.setdefault(normalized_id, {})
+
+
+def add_tab_session_to_frontend_url(frontend_url: str, tab_session_id: str) -> str:
+    """Return the frontend URL with the OAuth tab identifier attached."""
+
+    parsed_url = urlsplit(frontend_url)
+    query = dict(parse_qsl(parsed_url.query, keep_blank_values=True))
+    query["tab_session_id"] = tab_session_id
+    return urlunsplit(parsed_url._replace(query=urlencode(query)))
 
 
 def get_google_flow() -> Flow:
@@ -323,6 +369,9 @@ def persist_gmail_tokens(
 async def google_login(request: Request):
 
     print("[auth/google/login] Starting OAuth flow")
+    tab_session_id = request.query_params.get("tab_session_id")
+    get_or_create_tab_session(tab_session_id)
+    print(f"[auth/google/login] tab_session_id={tab_session_id[:8]}...")
     flow = get_google_flow()
 
     authorization_url, state = flow.authorization_url(
@@ -331,8 +380,11 @@ async def google_login(request: Request):
         prompt="consent",
     )
 
-    request.session["oauth_state"] = state
-    request.session["oauth_code_verifier"] = flow.code_verifier
+    with session_lock:
+        oauth_sessions[state] = {
+            "tab_session_id": str(uuid.UUID(tab_session_id)),
+            "code_verifier": flow.code_verifier,
+        }
 
     return RedirectResponse(url=authorization_url)
 
@@ -355,15 +407,19 @@ async def google_callback(
         )
 
     returned_state = request.query_params.get("state")
-    expected_state = request.session.pop("oauth_state", None)
-    if not expected_state or returned_state != expected_state:
+    with session_lock:
+        oauth_session = oauth_sessions.pop(returned_state, None)
+
+    if not oauth_session or not oauth_session.get("tab_session_id"):
         raise HTTPException(
             status_code=400,
             detail="Invalid OAuth state"
         )
 
     flow = get_google_flow()
-    code_verifier = request.session.pop("oauth_code_verifier", None)
+    code_verifier = oauth_session["code_verifier"]
+    tab_session_id = oauth_session["tab_session_id"]
+    print(f"[auth/google/callback] tab_session_id={tab_session_id[:8]}...")
 
     if not code_verifier:
         raise HTTPException(
@@ -546,16 +602,21 @@ async def google_callback(
     # Create login session
     # -----------------------------------------
 
-    request.session["user_id"] = user_id
-    request.session["email"] = email
-    request.session["name"] = name
+    tab_session = get_or_create_tab_session(tab_session_id)
+    tab_session.clear()
+    tab_session.update({
+        "user_id": user_id,
+        "email": email,
+        "name": name,
+    })
     print(f"[auth/google/callback] Session user_id={user_id}")
 
-    return RedirectResponse(
-        url=os.getenv(
+    frontend_url = os.getenv(
             "FRONTEND_URL",
             "http://localhost:5500/InboxAI_frontend/index.html"
         )
+    return RedirectResponse(
+        url=add_tab_session_to_frontend_url(frontend_url, tab_session_id)
     )
 
 
@@ -566,8 +627,11 @@ async def google_callback(
 @app.get("/auth/me")
 async def auth_me(request: Request):
 
-    user_id = request.session.get("user_id")
-    print(f"[auth/me] session user_id={user_id}")
+    tab_session = get_tab_session(request)
+    user_id = tab_session.get("user_id") if tab_session else None
+    tab_session_id = request.headers.get("X-Session-ID")
+    tab_id_log = f"{tab_session_id[:8]}..." if tab_session_id else "missing"
+    print(f"[auth/me] tab_session_id={tab_id_log} session user_id={user_id}")
 
     if not user_id:
         raise HTTPException(status_code=401, detail="Not logged in")
@@ -591,7 +655,8 @@ async def auth_me(request: Request):
 
     if not user:
 
-        request.session.clear()
+        with session_lock:
+            tab_sessions.pop(request.headers.get("X-Session-ID"), None)
         raise HTTPException(status_code=401, detail="Not logged in")
 
     return {
@@ -610,7 +675,9 @@ async def auth_me(request: Request):
 @app.post("/auth/logout")
 async def logout(request: Request):
 
-    request.session.clear()
+    tab_session_id = request.headers.get("X-Session-ID")
+    with session_lock:
+        tab_sessions.pop(tab_session_id, None)
     print("[auth/logout] Session cleared")
 
     return {
@@ -812,7 +879,8 @@ async def analyze_new_emails(email_ids: list[int], user_id: int):
 
 async def run_assistant_message(request: Request, user_id: int, message: str) -> str:
     assistant_user_id = f"inboxai_user_{user_id}"
-    session_id = request.session.get("adk_session_id")
+    tab_session = get_tab_session(request)
+    session_id = tab_session.get("adk_session_id") if tab_session else None
 
     session = None
     if session_id:
@@ -829,7 +897,7 @@ async def run_assistant_message(request: Request, user_id: int, message: str) ->
             user_id=assistant_user_id,
             session_id=session_id,
         )
-        request.session["adk_session_id"] = session_id
+        tab_session["adk_session_id"] = session_id
 
     content = types.Content(
         role="user",
@@ -947,7 +1015,8 @@ async def analyze_message(request: Request):
     if not message:
         raise HTTPException(status_code=400, detail="Message is required")
 
-    pending_draft = request.session.get("pending_email_draft")
+    tab_session = get_tab_session(request)
+    pending_draft = tab_session.get("pending_email_draft")
 
     if pending_draft:
         if is_confirmation(message):
@@ -963,11 +1032,11 @@ async def analyze_message(request: Request):
             except RuntimeError as error:
                 return {"response": str(error)}
 
-            request.session.pop("pending_email_draft", None)
+            tab_session.pop("pending_email_draft", None)
             return {"response": "Email sent successfully."}
 
         if is_cancellation(message):
-            request.session.pop("pending_email_draft", None)
+            tab_session.pop("pending_email_draft", None)
             return {"response": "Okay, I cancelled the email."}
 
     try:
@@ -983,7 +1052,7 @@ async def analyze_message(request: Request):
     draft_result = extract_agent_draft_response(
         model_response=agent_response,
         original_draft=pending_draft,
-        sender_name=request.session.get("name", ""),
+        sender_name=tab_session.get("name", ""),
     )
     if draft_result:
         response, draft = draft_result
@@ -991,11 +1060,11 @@ async def analyze_message(request: Request):
         if gmail_account:
             draft["sender"] = gmail_account[1]
         draft["sender_name"] = (
-            pending_draft.get("sender_name", request.session.get("name", ""))
+            pending_draft.get("sender_name", tab_session.get("name", ""))
             if pending_draft
-            else request.session.get("name", "")
+            else tab_session.get("name", "")
         )
-        request.session["pending_email_draft"] = draft
+        tab_session["pending_email_draft"] = draft
         return {"response": response, "draft": draft}
 
     return {"response": agent_response}
